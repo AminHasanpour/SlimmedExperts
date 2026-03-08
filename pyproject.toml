@@ -1,0 +1,51 @@
+[build-system]
+requires = ["uv_build>=0.9.22,<0.10.0"]
+build-backend = "uv_build"
+
+[project]
+name = "slimmed_experts"
+version = "0.0.1"
+description = "Let\u0027s see if experts are slim."
+authors = [
+  { name = "Amin", email = "your@email.com" },
+]
+license = { file = "LICENSE" }
+keywords = ["machine learning", "deep learning"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "coverage>=7.13.4",
+    "invoke>=2.2.1",
+    "mkdocstrings-python>=2.0.3",
+    "mypy>=1.19.1",
+    "pre-commit>=4.5.1",
+    "pytest>=9.0.2",
+    "ruff>=0.15.5",
+    "zensical>=0.0.24",
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu" },
+]
+torchvision = [
+    { index = "pytorch-cpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.ruff]
+line-length = 120
+
+[tool.coverage.run]
+omit = ["tests/*"]
