@@ -12,7 +12,7 @@ The directory structure of the project looks like this:
 ├── dockerfiles/              # Dockerfiles
 ├── docs/                     # Documentation
 ├── models/                   # Trained models
-├── src/slimmed_experts/         # Source code
+├── src/slimmed_experts/      # Source code
 ├── tests/                    # Tests
 ├── .gitignore
 ├── .pre-commit-config.yaml

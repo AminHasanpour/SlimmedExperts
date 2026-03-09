@@ -17,7 +17,11 @@ classifiers = [
 ]
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "importlib-resources>=6.5.2",
+    "tensorflow>=2.21.0",
+    "tensorflow-datasets>=4.9.9",
+]
 
 [dependency-groups]
 dev = [
@@ -46,6 +50,9 @@ explicit = true
 
 [tool.ruff]
 line-length = 120
+
+[tool.mypy]
+ignore_missing_imports = true
 
 [tool.coverage.run]
 omit = ["tests/*"]
