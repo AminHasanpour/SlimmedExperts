@@ -19,8 +19,12 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "importlib-resources>=6.5.2",
+    "loguru>=0.7.3",
     "tensorflow>=2.21.0",
     "tensorflow-datasets>=4.9.9",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "wandb>=0.25.0",
 ]
 
 [dependency-groups]

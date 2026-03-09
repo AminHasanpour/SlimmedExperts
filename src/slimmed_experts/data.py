@@ -25,6 +25,10 @@ VDD_DOMAINS: list[str] = [
     "vgg-flowers",
 ]
 
+# ImageNet channel-wise mean and std used by TorchVision MobileNetV2.
+_IMAGENET_MEAN: tf.Tensor = tf.constant([0.485, 0.456, 0.406], dtype=tf.float32)
+_IMAGENET_STD: tf.Tensor = tf.constant([0.229, 0.224, 0.225], dtype=tf.float32)
+
 
 def preprocess_for_mobilenet(
     image: tf.Tensor,
@@ -34,8 +38,10 @@ def preprocess_for_mobilenet(
     """Preprocess a single image-label pair for MobileNetV2.
 
     Resizes the image to ``(MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE)``,
-    optionally applies random horizontal flipping, casts to ``float32``, and
-    scales pixel values to the ``[-1, 1]`` range expected by MobileNetV2.
+    optionally applies random horizontal flipping, casts to ``float32``, scales
+    pixel values to ``[0, 1]``, and normalises with ImageNet channel-wise mean
+    and standard deviation (``mean=[0.485, 0.456, 0.406]``,
+    ``std=[0.229, 0.224, 0.225]``).
 
     Args:
         image: Raw image tensor with shape ``[H, W, C]`` and dtype ``uint8`` or
@@ -45,14 +51,14 @@ def preprocess_for_mobilenet(
 
     Returns:
         A ``(image, label)`` tuple where ``image`` is ``float32`` with shape
-        ``[MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE, C]``.
+        ``[MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE, C]``, normalised with
+        ImageNet statistics.
     """
     image = tf.image.resize(image, [MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE])
     if augment:
         image = tf.image.random_flip_left_right(image)
-    # preprocess_input expects float32 and maps [0, 255] → [-1, 1].
-    image = tf.cast(image, tf.float32)
-    image = tf.keras.applications.mobilenet_v2.preprocess_input(image)
+    image = tf.cast(image, tf.float32) / 255.0
+    image = (image - _IMAGENET_MEAN) / _IMAGENET_STD
     return image, label
 
 

@@ -40,10 +40,17 @@ class TestPreprocessForMobilenet:
         assert out_image.dtype == tf.float32
 
     def test_value_range(self):
-        image = tf.constant([[[0.0, 0.0, 0.0]] * 64] * 64)
+        # ImageNet normalisation: (pixel/255 - mean) / std.
+        # For an all-zero image the result equals -mean/std per channel.
+        imagenet_mean = [0.485, 0.456, 0.406]
+        imagenet_std = [0.229, 0.224, 0.225]
+        expected = [-m / s for m, s in zip(imagenet_mean, imagenet_std)]  # ≈ [-2.118, -2.036, -1.804]
+
+        image = tf.zeros((64, 64, 3))
         out_image, _ = preprocess_for_mobilenet(image, tf.constant(0))
-        assert float(tf.reduce_min(out_image)) >= -1.0
-        assert float(tf.reduce_max(out_image)) <= 1.0
+
+        for c, exp in enumerate(expected):
+            assert abs(float(out_image[0, 0, c]) - exp) < 1e-4
 
     def test_label_unchanged(self):
         label = tf.constant(7)
