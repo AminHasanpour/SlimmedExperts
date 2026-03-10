@@ -6,6 +6,12 @@ WINDOWS = os.name == "nt"
 PROJECT_NAME = "slimmed_experts"
 PYTHON_VERSION = "3.12"
 
+# Project commands
+@task
+def experiment(ctx: Context, config: str = "configs/experiment.yaml") -> None:
+    """Run an experiment with the given configuration."""
+    ctx.run(f"uv run python src/{PROJECT_NAME}/experiment.py --config {config}", echo=True, pty=not WINDOWS)
+
 # Documentation commands
 @task
 def build_docs(ctx: Context) -> None:

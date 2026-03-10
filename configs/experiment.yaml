@@ -1,0 +1,67 @@
+base:
+  data:
+    load:
+      domains:
+        - aircraft
+        - cifar100
+        - daimlerpedcls
+        - dtd
+        - gtsrb
+        - imagenet12
+        - omniglot
+        - svhn
+        - ucf101
+        - vgg-flowers
+      data_dir: data      # Directory to store the downloaded datasets (null = default: ~/tensorflow_datasets/)
+    preprocess:
+      batch_size: 128
+      shuffle: true
+      shuffle_buffer_size: 1000
+      augment: false      # Whether to apply data augmentation (horizontal flip). Only applies to training data.
+      seed: 42            # Random seed for reproducibility (null = no seed)
+
+  model:
+    width_mult: 1.0
+    small_input: true     # Whether to set the first convolutional layer's stride to 1
+
+  train:
+    total_steps: 1000
+    learning_rate: 1e-3
+    weight_decay: 0.0
+    optimizer: adam
+    val_every_n_steps: 100
+    output_dir: models    # Directory to save checkpoints (null = don't save)
+    wandb_project: slimmed-experts
+    wandb_run_name: null  # Name for the Weights & Biases run (null = auto-generated name)
+    device: cpu           # Device to train on (e.g., "cpu", "cuda", etc.)
+
+variants:
+  - data:
+      load:
+        domains: [cifar100]
+    model:
+      width_mult: 0.5
+    train:
+      output_dir: models/expert_0.5
+      wandb_run_name: expert_0.5
+
+  - data:
+      load:
+        domains: [cifar100]
+    model:
+      width_mult: 1.0
+    train:
+      output_dir: models/expert_1.0
+      wandb_run_name: expert_1.0
+
+  - model:
+      width_mult: 0.5
+    train:
+      output_dir: models/general_0.5
+      wandb_run_name: general_0.5
+
+  - model:
+      width_mult: 1.0
+    train:
+      output_dir: models/general_1.0
+      wandb_run_name: general_1.0
