@@ -1,5 +1,6 @@
 # project specific
 data/
+models/
 
 # docs
 docs/site/

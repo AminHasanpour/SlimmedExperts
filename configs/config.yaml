@@ -11,15 +11,25 @@ data:
       - svhn
       - ucf101
       - vgg-flowers
-    split:
-      - train
-      - test
-      - validation
-    data_dir: data  # Directory to store the downloaded datasets (null = default: ~/tensorflow_datasets/)
+    data_dir: data      # Directory to store the downloaded datasets (null = default: ~/tensorflow_datasets/)
   preprocess:
     batch_size: 128
     shuffle: true
     shuffle_buffer_size: 1000
-    augment: false
-    prefetch: null  # Number of batches to prefetch (null = auto-tune)
-    seed: 42  # Random seed for reproducibility (null = no seed)
+    augment: false      # Whether to apply data augmentation (horizontal flip). Only applies to training data.
+    seed: 42            # Random seed for reproducibility (null = no seed)
+
+model:
+  width_mult: 1.0
+  small_input: true     # Whether to set the first convolutional layer's stride to 1
+
+train:
+  total_steps: 1000
+  learning_rate: 1e-3
+  weight_decay: 0.0
+  optimizer: adam
+  val_every_n_steps: 100
+  output_dir: models    # Directory to save checkpoints (null = don't save)
+  wandb_project: slimmed-experts
+  wandb_run_name: null  # Name for the Weights & Biases run (null = auto-generated name)
+  device: cpu           # Device to train on (e.g., "cpu", "cuda", etc.)
