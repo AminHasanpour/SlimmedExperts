@@ -1,6 +1,6 @@
 wandb:
-  wandb_project: slimmed-experts
-  wandb_run_name: null  # Name for the Weights & Biases run (null = auto-generated name)
+  project: slimmed-experts
+  run_name: null  # Name for the Weights & Biases run (null = auto-generated name)
 
 data:
   load:

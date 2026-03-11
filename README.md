@@ -1,4 +1,3 @@
-````markdown
 # slimmed_experts
 
 Let's see if experts are slim.
@@ -26,5 +25,3 @@ The directory structure of the project looks like this:
 Created using [DeepTemplate](https://github.com/AminHasanpour/DeepTemplate),
 a [cookiecutter template](https://github.com/cookiecutter/cookiecutter) for getting
 started with Deep Learning Projects.
-
-````
