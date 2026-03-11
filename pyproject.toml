@@ -42,6 +42,7 @@ dev = [
 ]
 
 [project.scripts]
+pipeline = "slimmed_experts.pipeline:app"
 experiment = "slimmed_experts.experiment:app"
 
 [tool.ruff]

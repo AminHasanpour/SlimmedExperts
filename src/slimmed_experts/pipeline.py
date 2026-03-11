@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Annotated, cast
 
+import typer
 import torch
 from loguru import logger
+from omegaconf import DictConfig, OmegaConf
 
 from slimmed_experts.data import VDD_DOMAINS, load_domain, preprocess_domain
 from slimmed_experts.model import MobileNetV2MultiHead
@@ -167,3 +170,44 @@ def run_pipeline(
     )
 
     return final_metrics
+
+
+app = typer.Typer()
+
+
+@app.command()
+def main(
+    config: Annotated[
+        Path,
+        typer.Option("--config", "-c", help="Path to pipeline YAML configuration file."),
+    ] = Path("configs/pipeline.yaml"),
+) -> None:
+    """Run a single pipeline defined by a YAML configuration file."""
+    logger.info(f"Loading pipeline config from {config}")
+    cfg = cast(DictConfig, OmegaConf.load(config))
+    kwargs = {
+        "domains": list(cfg.data.load.domains),
+        "data_dir": cfg.data.load.data_dir,
+        "batch_size": cfg.data.preprocess.batch_size,
+        "shuffle": cfg.data.preprocess.shuffle,
+        "shuffle_buffer_size": cfg.data.preprocess.shuffle_buffer_size,
+        "augment": cfg.data.preprocess.augment,
+        "seed": cfg.data.preprocess.seed,
+        "width_mult": cfg.model.width_mult,
+        "small_input": cfg.model.small_input,
+        "total_steps": cfg.train.total_steps,
+        "learning_rate": cfg.train.learning_rate,
+        "weight_decay": cfg.train.weight_decay,
+        "optimizer": cfg.train.optimizer,
+        "val_every_n_steps": cfg.train.val_every_n_steps,
+        "output_dir": cfg.train.output_dir,
+        "wandb_project": cfg.train.wandb_project,
+        "wandb_run_name": cfg.train.wandb_run_name,
+        "device": cfg.train.device,
+    }
+    results = run_pipeline(**kwargs)
+    logger.info(f"Pipeline complete. Metrics: {results}")
+
+
+if __name__ == "__main__":
+    app()

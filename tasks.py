@@ -8,6 +8,11 @@ PYTHON_VERSION = "3.12"
 
 # Project commands
 @task
+def pipeline(ctx: Context, config: str = "configs/pipeline.yaml") -> None:
+    """Run the training pipeline with the given configuration."""
+    ctx.run(f"uv run python src/{PROJECT_NAME}/pipeline.py --config {config}", echo=True, pty=not WINDOWS)
+
+@task
 def experiment(ctx: Context, config: str = "configs/experiment.yaml") -> None:
     """Run an experiment with the given configuration."""
     ctx.run(f"uv run python src/{PROJECT_NAME}/experiment.py --config {config}", echo=True, pty=not WINDOWS)
