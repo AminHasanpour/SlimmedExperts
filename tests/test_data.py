@@ -2,28 +2,25 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
-import tensorflow as tf
+import torch
+from PIL import Image
+from torch.utils.data import Dataset
 
 from slimmed_experts.data import (
     MOBILENET_INPUT_SIZE,
     VDD_DOMAINS,
     load_domain,
     load_domains,
-    preprocess_domain,
-    preprocess_for_mobilenet,
+    make_dataloader,
+    mobilenet_transform,
 )
 
 
-def _make_ds(num_samples: int = 12, height: int = 32, width: int = 32, channels: int = 3) -> tf.data.Dataset:
-    images = tf.random.uniform((num_samples, height, width, channels), 0, 255, dtype=tf.float32)
-    labels = tf.random.uniform((num_samples,), 0, 10, dtype=tf.int32)
-    return tf.data.Dataset.from_tensor_slices((images, labels))
-
-
 def _write_jpeg(path, height: int = 8, width: int = 8) -> None:
-    img = tf.cast(tf.random.uniform((height, width, 3), 0, 255), tf.uint8)
-    path.write_bytes(tf.image.encode_jpeg(img).numpy())
+    img = Image.fromarray(np.random.randint(0, 255, (height, width, 3), dtype=np.uint8))
+    img.save(path)
 
 
 @pytest.fixture()
@@ -41,73 +38,67 @@ def data_dir(tmp_path):
     return tmp_path
 
 
-class TestPreprocessForMobilenet:
+class TestMobilenetTransform:
     def test_output_shape(self):
-        image = tf.random.uniform((64, 64, 3), 0, 255)
-        out_image, _ = preprocess_for_mobilenet(image, tf.constant(0))
-        assert out_image.shape == (MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE, 3)
+        img = Image.fromarray(np.zeros((64, 64, 3), dtype=np.uint8))
+        out = mobilenet_transform()(img)
+        assert out.shape == (3, MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE)
 
     def test_output_dtype(self):
-        image = tf.random.uniform((64, 64, 3), 0, 255)
-        out_image, _ = preprocess_for_mobilenet(image, tf.constant(0))
-        assert out_image.dtype == tf.float32
+        img = Image.fromarray(np.zeros((64, 64, 3), dtype=np.uint8))
+        out = mobilenet_transform()(img)
+        assert out.dtype == torch.float32
 
-    def test_value_range(self):
-        # ImageNet normalisation: (pixel/255 - mean) / std.
-        # For an all-zero image the result equals -mean/std per channel.
+    def test_value_range_normalized(self):
+        # An all-zero image produces (-mean/std) per channel after normalisation.
         imagenet_mean = [0.485, 0.456, 0.406]
         imagenet_std = [0.229, 0.224, 0.225]
-        expected = [-m / s for m, s in zip(imagenet_mean, imagenet_std)]  # ≈ [-2.118, -2.036, -1.804]
+        expected = [-m / s for m, s in zip(imagenet_mean, imagenet_std)]
 
-        image = tf.zeros((64, 64, 3))
-        out_image, _ = preprocess_for_mobilenet(image, tf.constant(0))
+        img = Image.fromarray(np.zeros((64, 64, 3), dtype=np.uint8))
+        out = mobilenet_transform()(img)
 
         for c, exp in enumerate(expected):
-            assert abs(float(out_image[0, 0, c]) - exp) < 1e-4
+            assert abs(float(out[c, 0, 0]) - exp) < 1e-4
 
-    def test_label_unchanged(self):
-        label = tf.constant(7)
-        _, out_label = preprocess_for_mobilenet(tf.random.uniform((16, 16, 3)), label)
-        assert int(out_label) == 7
+    def test_augment_flag_does_not_change_shape(self):
+        img = Image.fromarray(np.zeros((64, 64, 3), dtype=np.uint8))
+        out = mobilenet_transform(augment=True)(img)
+        assert out.shape == (3, MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE)
 
 
-class TestPreprocessDomain:
-    def test_output_shape(self):
-        ds = _make_ds(num_samples=8)
-        result = preprocess_domain(ds, batch_size=4)
-        batch_images, batch_labels = next(iter(result))
-        assert batch_images.shape == (4, MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE, 3)
-        assert batch_labels.shape == (4,)
+class TestMakeDataloader:
+    def test_batch_size(self, data_dir):
+        ds = load_domain("aircraft", "train", data_dir=data_dir)
+        loader = make_dataloader(ds, batch_size=1)
+        images, labels = next(iter(loader))
+        assert images.shape[0] == 1
 
-    def test_batch_size(self):
-        ds = _make_ds(num_samples=10)
-        result = preprocess_domain(ds, batch_size=5)
-        batch_images, _ = next(iter(result))
-        assert batch_images.shape[0] == 5
+    def test_output_shape(self, data_dir):
+        ds = load_domain("aircraft", "train", data_dir=data_dir)
+        loader = make_dataloader(ds, batch_size=2)
+        images, labels = next(iter(loader))
+        assert images.shape == (2, 3, MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE)
+        assert labels.shape == (2,)
 
-    def test_no_shuffle_by_default(self):
-        ds = _make_ds(num_samples=8)
-        # Should not raise and should yield deterministic output when shuffle=False.
-        r1 = list(preprocess_domain(ds, batch_size=8, shuffle=False).as_numpy_iterator())
-        r2 = list(preprocess_domain(ds, batch_size=8, shuffle=False).as_numpy_iterator())
-        import numpy as np
+    def test_no_shuffle_by_default(self, data_dir):
+        ds = load_domain("aircraft", "train", data_dir=data_dir)
+        r1 = [lbl for _, lbl in make_dataloader(ds, batch_size=4, shuffle=False)]
+        r2 = [lbl for _, lbl in make_dataloader(ds, batch_size=4, shuffle=False)]
+        assert all(torch.equal(a, b) for a, b in zip(r1, r2))
 
-        assert np.allclose(r1[0][0], r2[0][0])
-
-    def test_shuffle_with_seed_is_reproducible(self):
-        ds = _make_ds(num_samples=20)
-        kwargs = dict(batch_size=5, shuffle=True, shuffle_buffer_size=20, seed=42)
-        labels_1 = next(iter(preprocess_domain(ds, **kwargs)))[1].numpy().tolist()
-        labels_2 = next(iter(preprocess_domain(ds, **kwargs)))[1].numpy().tolist()
-        assert labels_1 == labels_2
-
-    def test_shuffle_without_seed_differs(self):
-        # With no seed two passes are very unlikely to produce the same order.
-        ds = _make_ds(num_samples=50)
-        kwargs = dict(batch_size=50, shuffle=True, shuffle_buffer_size=50, seed=None)
-        labels_1 = next(iter(preprocess_domain(ds, **kwargs)))[1].numpy().tolist()
-        labels_2 = next(iter(preprocess_domain(ds, **kwargs)))[1].numpy().tolist()
-        assert labels_1 != labels_2
+    def test_shuffle_with_seed_is_reproducible(self, data_dir):
+        # Build a larger split so shuffle has something to permute
+        for cls in ("0003", "0004"):
+            cls_dir = data_dir / "aircraft" / "train" / cls
+            cls_dir.mkdir(parents=True, exist_ok=True)
+            for i in range(3):
+                _write_jpeg(cls_dir / f"00000{i}.jpg")
+        ds = load_domain("aircraft", "train", data_dir=data_dir)
+        kwargs = dict(batch_size=8, shuffle=True, seed=42)
+        labels_1 = [lbl for _, lbl in make_dataloader(ds, **kwargs)]
+        labels_2 = [lbl for _, lbl in make_dataloader(ds, **kwargs)]
+        assert all(torch.equal(a, b) for a, b in zip(labels_1, labels_2))
 
 
 class TestLoadDomain:
@@ -117,18 +108,28 @@ class TestLoadDomain:
 
     def test_single_split_returns_dataset(self, data_dir):
         result = load_domain("aircraft", "train", data_dir=data_dir)
-        assert isinstance(result, tf.data.Dataset)
+        assert isinstance(result, Dataset)
 
     def test_multi_split_returns_dict(self, data_dir):
         result = load_domain("aircraft", ["train", "test"], data_dir=data_dir)
         assert isinstance(result, dict)
         assert set(result.keys()) == {"train", "test"}
-        assert all(isinstance(v, tf.data.Dataset) for v in result.values())
+        assert all(isinstance(v, Dataset) for v in result.values())
 
     def test_all_valid_domains_accepted(self, data_dir):
         for domain in VDD_DOMAINS:
             result = load_domain(domain, "train", data_dir=data_dir)
-            assert isinstance(result, tf.data.Dataset)
+            assert isinstance(result, Dataset)
+
+    def test_labeled_split_has_correct_num_classes(self, data_dir):
+        ds = load_domain("aircraft", "train", data_dir=data_dir)
+        # The fixture creates 2 class dirs per labeled split
+        assert len(ds.classes) == 2  # type: ignore[attr-defined]
+
+    def test_test_split_returns_minus_one_labels(self, data_dir):
+        ds = load_domain("aircraft", "test", data_dir=data_dir)
+        _, label = ds[0]
+        assert label == -1
 
 
 class TestLoadDomains:

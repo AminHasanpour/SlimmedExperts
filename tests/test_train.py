@@ -3,30 +3,30 @@
 from __future__ import annotations
 
 import pytest
-import tensorflow as tf
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
 
 from slimmed_experts.model import MobileNetV2MultiHead
-from slimmed_experts.train import _evaluate, _save_checkpoint, _tf_batch_to_torch, train
+from slimmed_experts.train import _evaluate, _save_checkpoint, train
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_tf_dataset(
+def _make_dataloader(
     num_batches: int = 3,
     batch_size: int = 4,
     height: int = 32,
     width: int = 32,
     num_classes: int = 5,
-) -> tf.data.Dataset:
-    """Return a tiny batched TF dataset with synthetic BHWC images."""
+) -> DataLoader:
+    """Return a tiny batched DataLoader with synthetic BCHW images."""
     n = num_batches * batch_size
-    images = tf.random.uniform((n, height, width, 3), dtype=tf.float32)
-    labels = tf.random.uniform((n,), 0, num_classes, dtype=tf.int32)
-    return tf.data.Dataset.from_tensor_slices((images, labels)).batch(batch_size)
+    images = torch.rand(n, 3, height, width)
+    labels = torch.randint(0, num_classes, (n,))
+    return DataLoader(TensorDataset(images, labels), batch_size=batch_size)
 
 
 # ---------------------------------------------------------------------------
@@ -43,46 +43,6 @@ def tiny_model():
         width_mult=0.35,
         small_input=True,
     )
-
-
-# ---------------------------------------------------------------------------
-# _tf_batch_to_torch
-# ---------------------------------------------------------------------------
-
-
-class TestTfBatchToTorch:
-    def test_images_permuted_to_bchw(self):
-        images_tf = tf.random.uniform((4, 32, 32, 3), dtype=tf.float32)
-        labels_tf = tf.zeros((4,), dtype=tf.int32)
-
-        images, _ = _tf_batch_to_torch(images_tf, labels_tf, torch.device("cpu"))
-
-        assert images.shape == (4, 3, 32, 32)
-
-    def test_labels_dtype_is_long(self):
-        images_tf = tf.zeros((2, 8, 8, 3), dtype=tf.float32)
-        labels_tf = tf.constant([1, 2], dtype=tf.int32)
-
-        _, labels = _tf_batch_to_torch(images_tf, labels_tf, torch.device("cpu"))
-
-        assert labels.dtype == torch.long
-
-    def test_label_values_preserved(self):
-        images_tf = tf.zeros((3, 8, 8, 3), dtype=tf.float32)
-        labels_tf = tf.constant([0, 4, 9], dtype=tf.int32)
-
-        _, labels = _tf_batch_to_torch(images_tf, labels_tf, torch.device("cpu"))
-
-        assert labels.tolist() == [0, 4, 9]
-
-    def test_tensors_placed_on_cpu(self):
-        images_tf = tf.zeros((2, 8, 8, 3), dtype=tf.float32)
-        labels_tf = tf.zeros((2,), dtype=tf.int32)
-
-        images, labels = _tf_batch_to_torch(images_tf, labels_tf, torch.device("cpu"))
-
-        assert images.device.type == "cpu"
-        assert labels.device.type == "cpu"
 
 
 # ---------------------------------------------------------------------------
@@ -148,8 +108,8 @@ class TestEvaluate:
     def test_returns_acc_and_loss_for_each_domain(self, tiny_model):
         criterion = nn.CrossEntropyLoss()
         val_ds = {
-            "d1": _make_tf_dataset(num_classes=5),
-            "d2": _make_tf_dataset(num_classes=8),
+            "d1": _make_dataloader(num_classes=5),
+            "d2": _make_dataloader(num_classes=8),
         }
 
         metrics = _evaluate(tiny_model, val_ds, criterion, torch.device("cpu"), ["d1", "d2"])
@@ -160,7 +120,7 @@ class TestEvaluate:
 
     def test_acc_is_between_zero_and_one(self, tiny_model):
         criterion = nn.CrossEntropyLoss()
-        val_ds = {"d1": _make_tf_dataset(num_classes=5)}
+        val_ds = {"d1": _make_dataloader(num_classes=5)}
 
         metrics = _evaluate(tiny_model, val_ds, criterion, torch.device("cpu"), ["d1"])
 
@@ -168,7 +128,7 @@ class TestEvaluate:
 
     def test_loss_is_nonnegative(self, tiny_model):
         criterion = nn.CrossEntropyLoss()
-        val_ds = {"d1": _make_tf_dataset(num_classes=5)}
+        val_ds = {"d1": _make_dataloader(num_classes=5)}
 
         metrics = _evaluate(tiny_model, val_ds, criterion, torch.device("cpu"), ["d1"])
 
@@ -176,7 +136,7 @@ class TestEvaluate:
 
     def test_domain_absent_from_val_datasets_is_skipped(self, tiny_model):
         criterion = nn.CrossEntropyLoss()
-        val_ds = {"d1": _make_tf_dataset(num_classes=5)}  # "d2" intentionally omitted
+        val_ds = {"d1": _make_dataloader(num_classes=5)}  # "d2" intentionally omitted
 
         metrics = _evaluate(tiny_model, val_ds, criterion, torch.device("cpu"), ["d1", "d2"])
 
@@ -191,8 +151,8 @@ class TestEvaluate:
 
 class TestTrain:
     def test_invalid_optimizer_raises_value_error(self, tiny_model):
-        train_ds = {"d1": _make_tf_dataset(num_classes=5)}
-        val_ds = {"d1": _make_tf_dataset(num_classes=5)}
+        train_ds = {"d1": _make_dataloader(num_classes=5)}
+        val_ds = {"d1": _make_dataloader(num_classes=5)}
 
         # ValueError is raised before wandb.init(), so no mocking needed.
         with pytest.raises(ValueError, match="Unknown optimizer"):
@@ -206,8 +166,8 @@ class TestTrain:
             )
 
     def test_returns_metrics_dict_with_expected_keys(self, tiny_model):
-        train_ds = {"d1": _make_tf_dataset(num_classes=5)}
-        val_ds = {"d1": _make_tf_dataset(num_classes=5)}
+        train_ds = {"d1": _make_dataloader(num_classes=5)}
+        val_ds = {"d1": _make_dataloader(num_classes=5)}
 
         result = train(
             tiny_model,
@@ -224,8 +184,8 @@ class TestTrain:
         assert "loss/d1" in result
 
     def test_creates_last_and_best_checkpoints(self, tiny_model, tmp_path):
-        train_ds = {"d1": _make_tf_dataset(num_classes=5)}
-        val_ds = {"d1": _make_tf_dataset(num_classes=5)}
+        train_ds = {"d1": _make_dataloader(num_classes=5)}
+        val_ds = {"d1": _make_dataloader(num_classes=5)}
 
         train(
             tiny_model,
@@ -242,8 +202,8 @@ class TestTrain:
         assert (tmp_path / "best.pt").exists()
 
     def test_no_checkpoint_when_output_dir_is_none(self, tiny_model, tmp_path):
-        train_ds = {"d1": _make_tf_dataset(num_classes=5)}
-        val_ds = {"d1": _make_tf_dataset(num_classes=5)}
+        train_ds = {"d1": _make_dataloader(num_classes=5)}
+        val_ds = {"d1": _make_dataloader(num_classes=5)}
 
         train(
             tiny_model,
@@ -259,8 +219,8 @@ class TestTrain:
         assert not (tmp_path / "last.pt").exists()
 
     def test_sgd_optimizer_runs_successfully(self, tiny_model):
-        train_ds = {"d1": _make_tf_dataset(num_classes=5)}
-        val_ds = {"d1": _make_tf_dataset(num_classes=5)}
+        train_ds = {"d1": _make_dataloader(num_classes=5)}
+        val_ds = {"d1": _make_dataloader(num_classes=5)}
 
         result = train(
             tiny_model,
@@ -277,12 +237,12 @@ class TestTrain:
 
     def test_multi_domain_round_robin(self, tiny_model):
         train_ds = {
-            "d1": _make_tf_dataset(num_classes=5),
-            "d2": _make_tf_dataset(num_classes=8),
+            "d1": _make_dataloader(num_classes=5),
+            "d2": _make_dataloader(num_classes=8),
         }
         val_ds = {
-            "d1": _make_tf_dataset(num_classes=5),
-            "d2": _make_tf_dataset(num_classes=8),
+            "d1": _make_dataloader(num_classes=5),
+            "d2": _make_dataloader(num_classes=8),
         }
 
         result = train(

@@ -14,11 +14,10 @@ data:
       - svhn
       - ucf101
       - vgg-flowers
-    data_dir: data      # Directory to store the downloaded datasets (null = default: ~/tensorflow_datasets/)
+    data_dir: data
   preprocess:
     batch_size: 128
     shuffle: true
-    shuffle_buffer_size: 1000
     augment: false      # Whether to apply data augmentation (horizontal flip). Only applies to training data.
     seed: 42            # Random seed for reproducibility (null = no seed)
 

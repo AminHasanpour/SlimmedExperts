@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import os
+import tarfile
+import tempfile
+import urllib.request
 from pathlib import Path
 
-import tensorflow as tf
+import torch
+from loguru import logger
+from PIL import Image
+from torch.utils.data import DataLoader, Dataset
+from torchvision import transforms
+from torchvision.datasets import ImageFolder
 
 
 # MobileNetV2 expected input spatial size (height and width).
-MOBILENET_INPUT_SIZE: int = 224
+MOBILENET_INPUT_SIZE: int = 74
 
 # List of valid VDD domains.
 VDD_DOMAINS: list[str] = [
@@ -24,112 +32,137 @@ VDD_DOMAINS: list[str] = [
     "vgg-flowers",
 ]
 
+# URL to download the full VDD dataset archive.
+_VDD_DOWNLOAD_URL: str = "http://www.robots.ox.ac.uk/~vgg/share/decathlon-1.0-data.tar.gz"
+
 # ImageNet channel-wise mean and std used by TorchVision MobileNetV2.
-_IMAGENET_MEAN: tf.Tensor = tf.constant([0.485, 0.456, 0.406], dtype=tf.float32)
-_IMAGENET_STD: tf.Tensor = tf.constant([0.229, 0.224, 0.225], dtype=tf.float32)
+_IMAGENET_MEAN: list[float] = [0.485, 0.456, 0.406]
+_IMAGENET_STD: list[float] = [0.229, 0.224, 0.225]
 
 
-def preprocess_for_mobilenet(
-    image: tf.Tensor,
-    label: tf.Tensor,
-    augment: bool = False,
-) -> tuple[tf.Tensor, tf.Tensor]:
-    """Preprocess a single image-label pair for MobileNetV2.
+def _ensure_domains(data_dir: Path, domains: list[str]) -> None:
+    """Download and extract VDD datasets if any of the requested domains are missing.
 
-    Resizes the image to ``(MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE)``,
-    optionally applies random horizontal flipping, casts to ``float32``, scales
-    pixel values to ``[0, 1]``, and normalises with ImageNet channel-wise mean
-    and standard deviation (``mean=[0.485, 0.456, 0.406]``,
-    ``std=[0.229, 0.224, 0.225]``).
+    Downloads the full VDD archive to a temporary directory, extracts it there
+    (producing ``<domain>.tar`` files), then extracts each domain tar to
+    *data_dir*. The temporary directory is removed afterwards.
 
     Args:
-        image: Raw image tensor with shape ``[H, W, C]`` and dtype ``uint8`` or
-            ``float32``.
-        label: Corresponding integer class label.
+        data_dir: Root directory where domain folders are expected.
+        domains: List of domain names to ensure are present.
+    """
+    missing = [d for d in domains if not (data_dir / d).is_dir()]
+    if not missing:
+        return
+
+    logger.info(f"Domains {missing} not found in {data_dir}. Downloading VDD dataset...")
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp = Path(tmp_dir)
+        archive = tmp / "decathlon-1.0-data.tar.gz"
+
+        logger.info(f"Downloading {_VDD_DOWNLOAD_URL} ...")
+        urllib.request.urlretrieve(_VDD_DOWNLOAD_URL, archive)
+
+        logger.info("Extracting main archive...")
+        with tarfile.open(archive) as tar:
+            tar.extractall(tmp)
+
+        logger.info(f"Extracting domain archives to {data_dir} ...")
+        for domain_tar in sorted(tmp.glob("*.tar")):
+            with tarfile.open(domain_tar) as tar:
+                tar.extractall(data_dir)
+
+    logger.info("Download and extraction complete.")
+
+
+def mobilenet_transform(augment: bool = False) -> transforms.Compose:
+    """Return the MobileNetV2 preprocessing transform.
+
+    Resizes to ``(MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE)``, optionally
+    applies random horizontal flipping, converts to a ``float32`` tensor, and
+    normalises with ImageNet channel-wise mean and standard deviation
+    (``mean=[0.485, 0.456, 0.406]``, ``std=[0.229, 0.224, 0.225]``).
+
+    Args:
         augment: If ``True``, applies a random horizontal flip.
 
     Returns:
-        A ``(image, label)`` tuple where ``image`` is ``float32`` with shape
-        ``[MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE, C]``, normalised with
-        ImageNet statistics.
+        A ``torchvision.transforms.Compose`` transform ready to apply to PIL images.
     """
-    image = tf.image.resize(image, [MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE])
+    t: list = [transforms.Resize((MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE))]
     if augment:
-        image = tf.image.random_flip_left_right(image)
-    image = tf.cast(image, tf.float32) / 255.0
-    image = (image - _IMAGENET_MEAN) / _IMAGENET_STD
-    return image, label
+        t.append(transforms.RandomHorizontalFlip())
+    t += [
+        transforms.ToTensor(),
+        transforms.Normalize(mean=_IMAGENET_MEAN, std=_IMAGENET_STD),
+    ]
+    return transforms.Compose(t)
 
 
-def preprocess_domain(
-    ds: tf.data.Dataset,
+class _FlatImageDataset(Dataset):
+    """Dataset for a flat directory of JPEG images without class labels.
+
+    All images are assigned label ``-1``.
+    """
+
+    def __init__(self, paths: list[str], transform: transforms.Compose) -> None:
+        self._paths = paths
+        self._transform = transform
+
+    def __len__(self) -> int:
+        return len(self._paths)
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
+        image = Image.open(self._paths[idx]).convert("RGB")
+        return self._transform(image), -1
+
+
+def _load_split(split_dir: Path, transform: transforms.Compose) -> Dataset:
+    """Load a split directory as a PyTorch Dataset.
+
+    Uses ``ImageFolder`` for labeled splits (train/val) that contain class
+    subdirectories, or :class:`_FlatImageDataset` (label ``-1``) for unlabeled
+    splits (test) with a flat layout.
+
+    Args:
+        split_dir: Path to the split directory.
+        transform: Transform to apply to each image.
+
+    Returns:
+        A PyTorch ``Dataset`` of ``(image_tensor, label)`` pairs.
+    """
+    has_labels = any(e.is_dir() for e in split_dir.iterdir())
+    if has_labels:
+        return ImageFolder(str(split_dir), transform=transform)
+    image_paths = sorted(str(p) for p in split_dir.glob("*.jpg"))
+    return _FlatImageDataset(image_paths, transform=transform)
+
+
+def make_dataloader(
+    dataset: Dataset,
     *,
     batch_size: int = 32,
     shuffle: bool = False,
-    shuffle_buffer_size: int = 1000,
-    augment: bool = False,
-    prefetch: int = tf.data.AUTOTUNE,
+    num_workers: int = 0,
     seed: int | None = None,
-) -> tf.data.Dataset:
-    """Apply the MobileNetV2 preprocessing pipeline to a dataset.
-
-    Applies (in order): preprocess → shuffle → batch → prefetch.
+) -> DataLoader:
+    """Wrap a dataset in a :class:`~torch.utils.data.DataLoader`.
 
     Args:
-        ds: ``tf.data.Dataset`` yielding ``(image, label)`` tuples.
+        dataset: PyTorch ``Dataset`` to load from.
         batch_size: Number of samples per batch.
-        shuffle: Whether to shuffle before batching.
-        shuffle_buffer_size: Number of elements held in the shuffle buffer.
-        augment: If ``True``, applies random horizontal flips.
-        prefetch: Number of batches to prefetch.
-        seed: Random seed for reproducible shuffling. ``None`` for non-deterministic behaviour.
+        shuffle: Whether to shuffle the data each epoch.
+        num_workers: Number of subprocess workers for data loading.
+        seed: Random seed for reproducible shuffling. ``None`` for
+            non-deterministic behaviour.
 
     Returns:
-        A preprocessed, batched, and prefetched ``tf.data.Dataset``.
+        A configured ``DataLoader`` instance.
     """
-    ds = ds.map(
-        lambda image, label: preprocess_for_mobilenet(image, label, augment=augment),
-        num_parallel_calls=tf.data.AUTOTUNE,
-    )
-    if shuffle:
-        ds = ds.shuffle(shuffle_buffer_size, seed=seed)
-    ds = ds.batch(batch_size)
-    ds = ds.prefetch(prefetch)
-    return ds
-
-
-def _load_split_from_dir(split_dir: str) -> tf.data.Dataset:
-    """Load images from a local split directory into a tf.data.Dataset.
-
-    For labeled splits (train/val): expects ``<split_dir>/<class_id>/<image>.jpg``.
-    For unlabeled splits (test): expects a flat ``<split_dir>/<image>.jpg``.
-    Labels are zero-indexed integers (sorted class-folder order) or ``-1`` for test.
-    """
-    entries = os.listdir(split_dir)
-    has_labels = any(os.path.isdir(os.path.join(split_dir, e)) for e in entries)
-
-    if has_labels:
-        class_dirs = sorted(e for e in entries if os.path.isdir(os.path.join(split_dir, e)))
-        paths: list[str] = []
-        labels: list[int] = []
-        for label_idx, class_dir in enumerate(class_dirs):
-            class_path = os.path.join(split_dir, class_dir)
-            for fname in sorted(os.listdir(class_path)):
-                if fname.lower().endswith(".jpg"):
-                    paths.append(os.path.join(class_path, fname))
-                    labels.append(label_idx)
-        path_ds = tf.data.Dataset.from_tensor_slices((paths, labels))
-        return path_ds.map(
-            lambda p, label: (tf.image.decode_jpeg(tf.io.read_file(p), channels=3), tf.cast(label, tf.int64)),
-            num_parallel_calls=tf.data.AUTOTUNE,
-        )
-    else:
-        paths = sorted(os.path.join(split_dir, f) for f in entries if f.lower().endswith(".jpg"))
-        path_ds = tf.data.Dataset.from_tensor_slices(paths)
-        return path_ds.map(
-            lambda p: (tf.image.decode_jpeg(tf.io.read_file(p), channels=3), tf.constant(-1, dtype=tf.int64)),
-            num_parallel_calls=tf.data.AUTOTUNE,
-        )
+    generator = torch.Generator().manual_seed(seed) if seed is not None else None
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, generator=generator)
 
 
 def load_domain(
@@ -137,37 +170,36 @@ def load_domain(
     split: str | list[str],
     *,
     data_dir: str | os.PathLike[str] | None = None,
-) -> tf.data.Dataset | dict[str, tf.data.Dataset]:
-    """Load a VDD domain from local files.
+    augment: bool = False,
+) -> Dataset | dict[str, Dataset]:
+    """Load a VDD domain from local files, downloading first if necessary.
 
     Args:
-        domain: Name of the VDD domain (e.g. ``"aircraft"``, ``"dtd"``). Must be
-            in :data:`VDD_DOMAINS`.
+        domain: Name of the VDD domain (e.g. ``"aircraft"``). Must be in
+            :data:`VDD_DOMAINS`.
         split: A single split string (e.g. ``"train"``) or a list of split
-            strings (e.g. ``["train", "test"]``).
+            strings (e.g. ``["train", "val"]``).
         data_dir: Root directory containing the domain folders. Defaults to
             ``"data"``.
+        augment: If ``True``, applies random horizontal flips. Pass ``False``
+            for validation and test splits.
 
     Returns:
-        A single ``tf.data.Dataset`` when *split* is a string, or a
-        ``dict[split_name → tf.data.Dataset]`` when *split* is a list.
+        A single ``Dataset`` when *split* is a string, or a
+        ``dict[split_name → Dataset]`` when *split* is a list.
 
     Raises:
         ValueError: If *domain* is not found in :data:`VDD_DOMAINS`.
-
-    Example:
-        >>> raw = load_domain("aircraft", "train")
-        >>> train_ds = preprocess_domain(raw, batch_size=64, shuffle=True, augment=True)
-        >>> splits = load_domain("cifar100", ["train", "test"])
-        >>> val_ds = preprocess_domain(splits["test"], batch_size=32)
     """
     if domain not in VDD_DOMAINS:
         raise ValueError(f"Unknown domain '{domain}'. Valid domains: {sorted(VDD_DOMAINS)}")
 
     base = Path(data_dir) if data_dir is not None else Path("data")
+    _ensure_domains(base, [domain])
+    transform = mobilenet_transform(augment)
     if isinstance(split, list):
-        return {s: _load_split_from_dir(str(base / domain / s)) for s in split}
-    return _load_split_from_dir(str(base / domain / split))
+        return {s: _load_split(base / domain / s, transform) for s in split}
+    return _load_split(base / domain / split, transform)
 
 
 def load_domains(
@@ -175,8 +207,9 @@ def load_domains(
     split: str | list[str],
     *,
     data_dir: str | os.PathLike[str] | None = None,
-) -> dict[str, tf.data.Dataset | dict[str, tf.data.Dataset]]:
-    """Load multiple VDD domains from local files.
+    augment: bool = False,
+) -> dict[str, Dataset | dict[str, Dataset]]:
+    """Load multiple VDD domains from local files, downloading first if necessary.
 
     Convenience wrapper around :func:`load_domain` for multiple domains.
 
@@ -184,7 +217,9 @@ def load_domains(
         domains: List of domain names (e.g. ``["aircraft", "dtd"]``). Each entry
             must be in :data:`VDD_DOMAINS`.
         split: A single split string or a list of split strings.
-        data_dir: Root directory containing the domain folders.
+        data_dir: Root directory containing the domain folders. Defaults to
+            ``"data"``.
+        augment: If ``True``, applies random horizontal flips.
 
     Returns:
         ``dict[domain_name → dataset]`` where each value mirrors the return type
@@ -192,9 +227,5 @@ def load_domains(
 
     Raises:
         ValueError: If any entry in *domains* is not found in :data:`VDD_DOMAINS`.
-
-    Example:
-        >>> raw = load_domains(["aircraft", "dtd"], ["train", "test"])
-        >>> train_ds = preprocess_domain(raw["aircraft"]["train"], batch_size=32, shuffle=True)
     """
-    return {domain: load_domain(domain, split, data_dir=data_dir) for domain in domains}
+    return {domain: load_domain(domain, split, data_dir=data_dir, augment=augment) for domain in domains}

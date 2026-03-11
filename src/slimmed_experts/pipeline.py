@@ -11,8 +11,9 @@ import torch
 import wandb
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
+from torch.utils.data import Dataset
 
-from slimmed_experts.data import VDD_DOMAINS, load_domain, preprocess_domain
+from slimmed_experts.data import VDD_DOMAINS, load_domain, make_dataloader
 from slimmed_experts.model import MobileNetV2MultiHead
 from slimmed_experts.train import train
 
@@ -47,7 +48,6 @@ def run_pipeline(
     # Data preprocessing
     batch_size: int = 32,
     shuffle: bool = True,
-    shuffle_buffer_size: int = 1000,
     augment: bool = False,
     seed: int | None = None,
     # Model
@@ -78,7 +78,6 @@ def run_pipeline(
             ``"data"``.
         batch_size: Number of samples per batch.
         shuffle: Whether to shuffle the training split before batching.
-        shuffle_buffer_size: Number of elements held in the shuffle buffer.
         augment: If ``True``, applies random horizontal flips during training.
         seed: Random seed for reproducible data shuffling.
         width_mult: MobileNetV2 width multiplier (e.g. 0.35, 0.5, 0.75, 1.0).
@@ -116,33 +115,13 @@ def run_pipeline(
 
     # --- Load and preprocess data ---
     logger.info("Loading and preprocessing datasets...")
-    raw_splits: dict[str, dict[str, object]] = {}
+    train_datasets = {}
+    val_datasets = {}
     for domain in domains:
-        raw_splits[domain] = load_domain(  # type: ignore[assignment]
-            domain,
-            ["train", "val"],
-            data_dir=resolved_data_dir,
-        )
-
-    train_datasets = {
-        d: preprocess_domain(
-            raw_splits[d]["train"],  # type: ignore[index]
-            batch_size=batch_size,
-            shuffle=shuffle,
-            shuffle_buffer_size=shuffle_buffer_size,
-            augment=augment,
-            seed=seed,
-        )
-        for d in domains
-    }
-    val_datasets = {
-        d: preprocess_domain(
-            raw_splits[d]["val"],  # type: ignore[index]
-            batch_size=batch_size,
-            shuffle=False,
-        )
-        for d in domains
-    }
+        train_ds = cast(Dataset, load_domain(domain, "train", data_dir=resolved_data_dir, augment=augment))
+        val_ds = cast(Dataset, load_domain(domain, "val", data_dir=resolved_data_dir))
+        train_datasets[domain] = make_dataloader(train_ds, batch_size=batch_size, shuffle=shuffle, seed=seed)
+        val_datasets[domain] = make_dataloader(val_ds, batch_size=batch_size)
 
     # --- Build model ---
     logger.info(f"Building MobileNetV2MultiHead (width_mult={width_mult}, small_input={small_input})...")
@@ -162,7 +141,6 @@ def run_pipeline(
             "data_dir": str(resolved_data_dir),
             "batch_size": batch_size,
             "shuffle": shuffle,
-            "shuffle_buffer_size": shuffle_buffer_size,
             "augment": augment,
             "seed": seed,
             "width_mult": width_mult,
@@ -215,7 +193,6 @@ def main(
         "data_dir": cfg.data.load.data_dir,
         "batch_size": cfg.data.preprocess.batch_size,
         "shuffle": cfg.data.preprocess.shuffle,
-        "shuffle_buffer_size": cfg.data.preprocess.shuffle_buffer_size,
         "augment": cfg.data.preprocess.augment,
         "seed": cfg.data.preprocess.seed,
         "width_mult": cfg.model.width_mult,

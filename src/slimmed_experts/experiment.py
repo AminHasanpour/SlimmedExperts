@@ -45,7 +45,6 @@ def _config_to_pipeline_kwargs(cfg: DictConfig) -> dict:
         "data_dir": cfg.data.load.data_dir,
         "batch_size": cfg.data.preprocess.batch_size,
         "shuffle": cfg.data.preprocess.shuffle,
-        "shuffle_buffer_size": cfg.data.preprocess.shuffle_buffer_size,
         "augment": cfg.data.preprocess.augment,
         "seed": cfg.data.preprocess.seed,
         "width_mult": cfg.model.width_mult,

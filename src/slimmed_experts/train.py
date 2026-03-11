@@ -10,33 +10,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 from loguru import logger
-from torch import Tensor
 from torch.optim import Adam, SGD
+from torch.utils.data import DataLoader
 
 from slimmed_experts.model import MultiHeadModel
-
-
-def _tf_batch_to_torch(
-    images: Any,
-    labels: Any,
-    device: torch.device,
-) -> tuple[Tensor, Tensor]:
-    """Convert a TensorFlow batch to PyTorch tensors.
-
-    Converts images from BHWC (TensorFlow convention) to BCHW (PyTorch
-    convention) and moves both tensors to the requested device.
-
-    Args:
-        images: TF eagertensor of shape ``(B, H, W, C)`` with dtype ``float32``.
-        labels: TF eagertensor of shape ``(B,)`` with integer labels.
-        device: Target PyTorch device.
-
-    Returns:
-        ``(images, labels)`` as PyTorch tensors on *device*.
-    """
-    img = torch.from_numpy(images.numpy()).permute(0, 3, 1, 2).to(device)
-    lbl = torch.from_numpy(labels.numpy()).long().to(device)
-    return img, lbl
 
 
 def _save_checkpoint(
@@ -68,7 +45,7 @@ def _save_checkpoint(
 
 def _evaluate(
     model: MultiHeadModel,
-    val_datasets: dict[str, Any],
+    val_datasets: dict[str, DataLoader],
     criterion: nn.CrossEntropyLoss,
     device: torch.device,
     domains: list[str],
@@ -77,7 +54,7 @@ def _evaluate(
 
     Args:
         model: The model to evaluate (sets to eval mode).
-        val_datasets: Mapping ``{domain: preprocessed tf.data.Dataset}``.
+        val_datasets: Mapping ``{domain: DataLoader}``.
         criterion: Loss function.
         device: PyTorch device.
         domains: Ordered list of domain names to evaluate.
@@ -94,8 +71,8 @@ def _evaluate(
             total_loss = 0.0
             total_correct = 0
             total_samples = 0
-            for images_tf, labels_tf in val_datasets[domain]:
-                images, labels = _tf_batch_to_torch(images_tf, labels_tf, device)
+            for images, labels in val_datasets[domain]:
+                images, labels = images.to(device), labels.to(device)
                 logits = model(images, domain)
                 loss = criterion(logits, labels)
                 preds = logits.argmax(dim=1)
@@ -109,8 +86,8 @@ def _evaluate(
 
 def train(
     model: MultiHeadModel,
-    train_datasets: dict[str, Any],
-    val_datasets: dict[str, Any],
+    train_datasets: dict[str, DataLoader],
+    val_datasets: dict[str, DataLoader],
     *,
     total_steps: int,
     learning_rate: float,
@@ -123,18 +100,15 @@ def train(
 ) -> dict[str, float]:
     """Train a multi-head model on multiple domains using round-robin batching.
 
-    Datasets must be fully preprocessed and batched before being passed in.
-    Training cycles through domains in round-robin order for *total_steps*
-    gradient updates and evaluates on *val_datasets* every *val_every_n_steps*
-    steps.
+    Datasets must be wrapped in :class:`~torch.utils.data.DataLoader` before
+    being passed in.  Training cycles through domains in round-robin order for
+    *total_steps* gradient updates and evaluates on *val_datasets* every
+    *val_every_n_steps* steps.
 
     Args:
         model: A :class:`~slimmed_experts.model.MultiHeadModel` instance.
-        train_datasets: Mapping ``{domain: preprocessed tf.data.Dataset}``
-            for training.  Datasets must be pre-batched, pre-shuffled, and ready
-            to iterate.
-        val_datasets: Mapping ``{domain: preprocessed tf.data.Dataset}``
-            for validation.  Same requirements as *train_datasets*.
+        train_datasets: Mapping ``{domain: DataLoader}`` for training.
+        val_datasets: Mapping ``{domain: DataLoader}`` for validation.
         total_steps: Total number of gradient update steps across all domains.
         learning_rate: Optimizer learning rate.
         weight_decay: L2 regularisation coefficient.
@@ -185,8 +159,8 @@ def train(
     model.train()
     for step in range(1, total_steps + 1):
         domain = next(domain_cycle)
-        images_tf, labels_tf = next(train_iters[domain])
-        images, labels = _tf_batch_to_torch(images_tf, labels_tf, device_)
+        images, labels = next(train_iters[domain])
+        images, labels = images.to(device_), labels.to(device_)
 
         opt.zero_grad()
         logits = model(images, domain)
