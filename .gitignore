@@ -2,6 +2,9 @@
 data/
 models/
 
+# wandb
+wandb/
+
 # docs
 docs/site/
 

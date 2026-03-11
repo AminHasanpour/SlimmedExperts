@@ -29,9 +29,6 @@ dependencies = [
     "wandb>=0.25.0",
 ]
 
-[project.scripts]
-experiment = "slimmed_experts.experiment:app"
-
 [dependency-groups]
 dev = [
     "coverage>=7.13.4",
@@ -44,18 +41,8 @@ dev = [
     "zensical>=0.0.24",
 ]
 
-[tool.uv.sources]
-torch = [
-    { index = "pytorch-cpu" },
-]
-torchvision = [
-    { index = "pytorch-cpu" },
-]
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
+[project.scripts]
+experiment = "slimmed_experts.experiment:app"
 
 [tool.ruff]
 line-length = 120

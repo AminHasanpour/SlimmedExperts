@@ -33,7 +33,7 @@ base:
     output_dir: models    # Directory to save checkpoints (null = don't save)
     wandb_project: slimmed-experts
     wandb_run_name: null  # Name for the Weights & Biases run (null = auto-generated name)
-    device: cpu           # Device to train on (e.g., "cpu", "cuda", etc.)
+    device: cpu           # Device to train on (e.g., "cpu", "cuda", "mps", etc.)
 
 variants:
   - data:
