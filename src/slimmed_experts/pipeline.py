@@ -183,6 +183,7 @@ def main(
     ] = Path("configs/pipeline.yaml"),
 ) -> None:
     """Run a single pipeline defined by a YAML configuration file."""
+    logger.add("logs/pipeline_{time}.log")
     logger.info(f"Loading pipeline config from {config}")
     cfg = cast(DictConfig, OmegaConf.load(config))
     kwargs = {

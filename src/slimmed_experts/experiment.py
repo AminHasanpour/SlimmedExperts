@@ -102,6 +102,7 @@ def main(
     The YAML file must have a ``base`` field with the default pipeline
     configuration and a ``variants`` field with a list of per-run overrides.
     """
+    logger.add("logs/experiment_{time}.log")
     logger.info(f"Loading experiment config from {config}")
     experiment_cfg = cast(DictConfig, OmegaConf.load(config))
     configs = _prepare_configs(experiment_cfg)
