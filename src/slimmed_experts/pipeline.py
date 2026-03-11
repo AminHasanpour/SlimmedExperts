@@ -8,6 +8,7 @@ from typing import Annotated, cast
 
 import typer
 import torch
+import wandb
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
 
@@ -152,6 +153,30 @@ def run_pipeline(
         small_input=small_input,
     )
 
+    # --- W&B ---
+    run = wandb.init(
+        project=wandb_project,
+        name=wandb_run_name,
+        config={
+            "domains": domains,
+            "data_dir": str(resolved_data_dir),
+            "batch_size": batch_size,
+            "shuffle": shuffle,
+            "shuffle_buffer_size": shuffle_buffer_size,
+            "augment": augment,
+            "seed": seed,
+            "width_mult": width_mult,
+            "small_input": small_input,
+            "total_steps": total_steps,
+            "learning_rate": learning_rate,
+            "weight_decay": weight_decay,
+            "optimizer": optimizer,
+            "val_every_n_steps": val_every_n_steps,
+            "output_dir": str(output_dir) if output_dir is not None else None,
+            "device": str(device),
+        },
+    )
+
     # --- Train ---
     logger.info("Starting training...")
     final_metrics = train(
@@ -164,11 +189,10 @@ def run_pipeline(
         optimizer=optimizer,
         val_every_n_steps=val_every_n_steps,
         output_dir=output_dir,
-        wandb_project=wandb_project,
-        wandb_run_name=wandb_run_name,
+        wandb_run=run,
         device=device,
     )
-
+    run.finish()
     return final_metrics
 
 
@@ -202,8 +226,8 @@ def main(
         "optimizer": cfg.train.optimizer,
         "val_every_n_steps": cfg.train.val_every_n_steps,
         "output_dir": cfg.train.output_dir,
-        "wandb_project": cfg.train.wandb_project,
-        "wandb_run_name": cfg.train.wandb_run_name,
+        "wandb_project": cfg.wandb.project,
+        "wandb_run_name": cfg.wandb.run_name,
         "device": cfg.train.device,
     }
     results = run_pipeline(**kwargs)

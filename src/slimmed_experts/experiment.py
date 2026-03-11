@@ -56,8 +56,8 @@ def _config_to_pipeline_kwargs(cfg: DictConfig) -> dict:
         "optimizer": cfg.train.optimizer,
         "val_every_n_steps": cfg.train.val_every_n_steps,
         "output_dir": cfg.train.output_dir,
-        "wandb_project": cfg.train.wandb_project,
-        "wandb_run_name": cfg.train.wandb_run_name,
+        "wandb_project": cfg.wandb.project,
+        "wandb_run_name": cfg.wandb.run_name,
         "device": cfg.train.device,
     }
 

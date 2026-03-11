@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 import tensorflow as tf
 import torch
@@ -207,8 +205,7 @@ class TestTrain:
                 optimizer="bad_opt",
             )
 
-    @patch("slimmed_experts.train.wandb")
-    def test_returns_metrics_dict_with_expected_keys(self, mock_wandb, tiny_model):
+    def test_returns_metrics_dict_with_expected_keys(self, tiny_model):
         train_ds = {"d1": _make_tf_dataset(num_classes=5)}
         val_ds = {"d1": _make_tf_dataset(num_classes=5)}
 
@@ -226,8 +223,7 @@ class TestTrain:
         assert "acc/d1" in result
         assert "loss/d1" in result
 
-    @patch("slimmed_experts.train.wandb")
-    def test_creates_last_and_best_checkpoints(self, mock_wandb, tiny_model, tmp_path):
+    def test_creates_last_and_best_checkpoints(self, tiny_model, tmp_path):
         train_ds = {"d1": _make_tf_dataset(num_classes=5)}
         val_ds = {"d1": _make_tf_dataset(num_classes=5)}
 
@@ -245,8 +241,7 @@ class TestTrain:
         assert (tmp_path / "last.pt").exists()
         assert (tmp_path / "best.pt").exists()
 
-    @patch("slimmed_experts.train.wandb")
-    def test_no_checkpoint_when_output_dir_is_none(self, mock_wandb, tiny_model, tmp_path):
+    def test_no_checkpoint_when_output_dir_is_none(self, tiny_model, tmp_path):
         train_ds = {"d1": _make_tf_dataset(num_classes=5)}
         val_ds = {"d1": _make_tf_dataset(num_classes=5)}
 
@@ -263,8 +258,7 @@ class TestTrain:
 
         assert not (tmp_path / "last.pt").exists()
 
-    @patch("slimmed_experts.train.wandb")
-    def test_sgd_optimizer_runs_successfully(self, mock_wandb, tiny_model):
+    def test_sgd_optimizer_runs_successfully(self, tiny_model):
         train_ds = {"d1": _make_tf_dataset(num_classes=5)}
         val_ds = {"d1": _make_tf_dataset(num_classes=5)}
 
@@ -281,8 +275,7 @@ class TestTrain:
 
         assert isinstance(result, dict)
 
-    @patch("slimmed_experts.train.wandb")
-    def test_multi_domain_round_robin(self, mock_wandb, tiny_model):
+    def test_multi_domain_round_robin(self, tiny_model):
         train_ds = {
             "d1": _make_tf_dataset(num_classes=5),
             "d2": _make_tf_dataset(num_classes=8),

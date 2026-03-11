@@ -13,8 +13,6 @@ from loguru import logger
 from torch import Tensor
 from torch.optim import Adam, SGD
 
-import wandb
-
 from slimmed_experts.model import MultiHeadModel
 
 
@@ -120,8 +118,7 @@ def train(
     optimizer: str = "adam",
     val_every_n_steps: int = 100,
     output_dir: str | Path | None = None,
-    wandb_project: str = "slimmed-experts",
-    wandb_run_name: str | None = None,
+    wandb_run: Any | None = None,
     device: str | torch.device = "cpu",
 ) -> dict[str, float]:
     """Train a multi-head model on multiple domains using round-robin batching.
@@ -145,8 +142,8 @@ def train(
         val_every_n_steps: Run validation every this many steps.
         output_dir: Directory to write ``best.pt`` and ``last.pt``.  ``None``
             disables checkpoint saving.
-        wandb_project: W&B project name.
-        wandb_run_name: W&B run display name (``None`` = W&B auto-generates one).
+        wandb_run: Active W&B run object to log metrics to.  Pass ``None`` to
+            disable W&B logging.
         device: PyTorch device string or object (e.g. ``"cpu"``, ``"cuda"``).
 
     Returns:
@@ -169,20 +166,6 @@ def train(
         raise ValueError(f"Unknown optimizer '{optimizer}'. Choose 'adam' or 'sgd'.")
 
     criterion = nn.CrossEntropyLoss()
-
-    # --- W&B ---
-    run = wandb.init(
-        project=wandb_project,
-        name=wandb_run_name,
-        config={
-            "total_steps": total_steps,
-            "learning_rate": learning_rate,
-            "weight_decay": weight_decay,
-            "optimizer": optimizer,
-            "val_every_n_steps": val_every_n_steps,
-            "domains": domains,
-        },
-    )
 
     # --- Output directory ---
     out: Path | None = None
@@ -215,7 +198,8 @@ def train(
             preds = logits.argmax(dim=1)
             acc = (preds == labels).float().mean().item()
 
-        wandb.log({f"train/loss/{domain}": loss.item(), f"train/acc/{domain}": acc}, step=step)
+        if wandb_run is not None:
+            wandb_run.log({f"train/loss/{domain}": loss.item(), f"train/acc/{domain}": acc}, step=step)
 
         if step % 100 == 0:
             logger.info(f"Step {step}/{total_steps} | domain={domain} | loss={loss.item():.4f} | acc={acc:.4f}")
@@ -225,7 +209,8 @@ def train(
             val_metrics = _evaluate(model, val_datasets, criterion, device_, domains)
             final_metrics = val_metrics
 
-            wandb.log({f"val/{k}": v for k, v in val_metrics.items()}, step=step)
+            if wandb_run is not None:
+                wandb_run.log({f"val/{k}": v for k, v in val_metrics.items()}, step=step)
 
             mean_val_acc = float(np.mean([v for k, v in val_metrics.items() if k.startswith("acc/")]))
             logger.info(f"Step {step} val | mean_acc={mean_val_acc:.4f} | {val_metrics}")
@@ -241,6 +226,5 @@ def train(
 
             model.train()
 
-    run.finish()
     logger.info(f"Training complete. Best val acc: {best_val_acc:.4f}")
     return final_metrics
