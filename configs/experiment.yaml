@@ -19,7 +19,7 @@ base:
     preprocess:
       batch_size: 128
       shuffle: true
-      augment: false    # Whether to apply data augmentation (horizontal flip). Only applies to training data.
+      augment: false    # Whether to apply data augmentation (random crop, flip, color jitter, rotation, erasing). Only applies to training data.
       seed: 42          # Random seed for reproducibility (null = no seed)
 
   model:
@@ -31,6 +31,7 @@ base:
     learning_rate: 1e-3
     weight_decay: 0.0
     optimizer: adam
+    scheduler: cosine   # LR scheduler: "cosine" (CosineAnnealingLR) or null to disable
     val_every_n_steps: 100
     output_dir: models  # Directory to save checkpoints (null = don't save)
     device: cpu         # Device to train on (e.g., "cpu", "cuda", "mps", etc.)

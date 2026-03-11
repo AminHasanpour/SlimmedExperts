@@ -81,23 +81,46 @@ def mobilenet_transform(augment: bool = False) -> transforms.Compose:
     """Return the MobileNetV2 preprocessing transform.
 
     Resizes to ``(MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE)``, optionally
-    applies random horizontal flipping, converts to a ``float32`` tensor, and
-    normalises with ImageNet channel-wise mean and standard deviation
+    applies a suite of data augmentations, converts to a ``float32`` tensor,
+    and normalises with ImageNet channel-wise mean and standard deviation
     (``mean=[0.485, 0.456, 0.406]``, ``std=[0.229, 0.224, 0.225]``).
 
+    When *augment* is ``True``, the following transforms are applied before
+    normalisation:
+
+    * Resize to 15 % larger than target, then :class:`~torchvision.transforms.RandomCrop`
+      to ``MOBILENET_INPUT_SIZE`` (random crop augmentation).
+    * :class:`~torchvision.transforms.RandomHorizontalFlip` (p=0.5).
+    * :class:`~torchvision.transforms.ColorJitter` (brightness, contrast,
+      saturation ±0.3, hue ±0.1).
+    * :class:`~torchvision.transforms.RandomRotation` (±15°).
+    * :class:`~torchvision.transforms.RandomErasing` (p=0.25) applied after
+      tensor conversion.
+
     Args:
-        augment: If ``True``, applies a random horizontal flip.
+        augment: If ``True``, applies the full augmentation suite described above.
 
     Returns:
         A ``torchvision.transforms.Compose`` transform ready to apply to PIL images.
     """
-    t: list = [transforms.Resize((MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE))]
+    _larger = int(MOBILENET_INPUT_SIZE * 1.15)
     if augment:
-        t.append(transforms.RandomHorizontalFlip())
-    t += [
-        transforms.ToTensor(),
-        transforms.Normalize(mean=_IMAGENET_MEAN, std=_IMAGENET_STD),
-    ]
+        t: list = [
+            transforms.Resize((_larger, _larger)),
+            transforms.RandomCrop(MOBILENET_INPUT_SIZE),
+            transforms.RandomHorizontalFlip(),
+            transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
+            transforms.RandomRotation(15),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=_IMAGENET_MEAN, std=_IMAGENET_STD),
+            transforms.RandomErasing(p=0.25),
+        ]
+    else:
+        t = [
+            transforms.Resize((MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=_IMAGENET_MEAN, std=_IMAGENET_STD),
+        ]
     return transforms.Compose(t)
 
 

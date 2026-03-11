@@ -58,6 +58,7 @@ def run_pipeline(
     learning_rate: float = 1e-3,
     weight_decay: float = 0.0,
     optimizer: str = "adam",
+    scheduler: str | None = "cosine",
     val_every_n_steps: int = 100,
     output_dir: str | Path | None = None,
     wandb_project: str = "slimmed-experts",
@@ -87,6 +88,7 @@ def run_pipeline(
         learning_rate: Optimizer learning rate.
         weight_decay: L2 regularisation coefficient.
         optimizer: ``"adam"`` or ``"sgd"``.
+        scheduler: LR scheduler to use (``"cosine"`` or ``None``).
         val_every_n_steps: Run validation every this many gradient steps.
         output_dir: Directory to write ``best.pt`` and ``last.pt`` checkpoints.
             ``None`` disables checkpoint saving.
@@ -149,6 +151,7 @@ def run_pipeline(
             "learning_rate": learning_rate,
             "weight_decay": weight_decay,
             "optimizer": optimizer,
+            "scheduler": scheduler,
             "val_every_n_steps": val_every_n_steps,
             "output_dir": str(output_dir) if output_dir is not None else None,
             "device": str(device),
@@ -165,6 +168,7 @@ def run_pipeline(
         learning_rate=learning_rate,
         weight_decay=weight_decay,
         optimizer=optimizer,
+        scheduler=scheduler,
         val_every_n_steps=val_every_n_steps,
         output_dir=output_dir,
         wandb_run=run,
@@ -201,6 +205,7 @@ def main(
         "learning_rate": cfg.train.learning_rate,
         "weight_decay": cfg.train.weight_decay,
         "optimizer": cfg.train.optimizer,
+        "scheduler": cfg.train.scheduler,
         "val_every_n_steps": cfg.train.val_every_n_steps,
         "output_dir": cfg.train.output_dir,
         "wandb_project": cfg.wandb.project,

@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 from loguru import logger
 from torch.optim import Adam, SGD
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 
 from slimmed_experts.model import MultiHeadModel
@@ -93,6 +94,7 @@ def train(
     learning_rate: float,
     weight_decay: float = 0.0,
     optimizer: str = "adam",
+    scheduler: str | None = "cosine",
     val_every_n_steps: int = 100,
     output_dir: str | Path | None = None,
     wandb_run: Any | None = None,
@@ -113,6 +115,9 @@ def train(
         learning_rate: Optimizer learning rate.
         weight_decay: L2 regularisation coefficient.
         optimizer: ``"adam"`` or ``"sgd"``.
+        scheduler: LR scheduler to use. ``"cosine"`` uses
+            :class:`~torch.optim.lr_scheduler.CosineAnnealingLR` with
+            ``T_max=total_steps``. Pass ``None`` to disable the scheduler.
         val_every_n_steps: Run validation every this many steps.
         output_dir: Directory to write ``best.pt`` and ``last.pt``.  ``None``
             disables checkpoint saving.
@@ -126,6 +131,7 @@ def train(
 
     Raises:
         ValueError: If *optimizer* is not ``"adam"`` or ``"sgd"``.
+        ValueError: If *scheduler* is not ``"cosine"`` or ``None``.
     """
     device_ = torch.device(device)
     model = model.to(device_)
@@ -138,6 +144,14 @@ def train(
         opt = SGD(model.parameters(), lr=learning_rate, momentum=0.9, weight_decay=weight_decay)
     else:
         raise ValueError(f"Unknown optimizer '{optimizer}'. Choose 'adam' or 'sgd'.")
+
+    # --- LR scheduler ---
+    if scheduler == "cosine":
+        sched: torch.optim.lr_scheduler.LRScheduler | None = CosineAnnealingLR(opt, T_max=total_steps)
+    elif scheduler is None:
+        sched = None
+    else:
+        raise ValueError(f"Unknown scheduler '{scheduler}'. Choose 'cosine' or None.")
 
     criterion = nn.CrossEntropyLoss()
 
@@ -167,13 +181,19 @@ def train(
         loss = criterion(logits, labels)
         loss.backward()
         opt.step()
+        if sched is not None:
+            sched.step()
 
         with torch.no_grad():
             preds = logits.argmax(dim=1)
             acc = (preds == labels).float().mean().item()
 
         if wandb_run is not None:
-            wandb_run.log({f"train/loss/{domain}": loss.item(), f"train/acc/{domain}": acc}, step=step)
+            lr = opt.param_groups[0]["lr"]
+            wandb_run.log(
+                {f"train/loss/{domain}": loss.item(), f"train/acc/{domain}": acc, "train/lr": lr},
+                step=step,
+            )
 
         if step % 100 == 0:
             logger.info(f"Step {step}/{total_steps} | domain={domain} | loss={loss.item():.4f} | acc={acc:.4f}")

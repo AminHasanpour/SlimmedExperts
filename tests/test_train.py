@@ -257,3 +257,51 @@ class TestTrain:
 
         assert "acc/d1" in result
         assert "acc/d2" in result
+
+    def test_cosine_scheduler_runs_successfully(self, tiny_model):
+        train_ds = {"d1": _make_dataloader(num_classes=5)}
+        val_ds = {"d1": _make_dataloader(num_classes=5)}
+
+        result = train(
+            tiny_model,
+            train_ds,
+            val_ds,
+            total_steps=4,
+            learning_rate=1e-3,
+            scheduler="cosine",
+            val_every_n_steps=4,
+            device="cpu",
+        )
+
+        assert isinstance(result, dict)
+
+    def test_no_scheduler_runs_successfully(self, tiny_model):
+        train_ds = {"d1": _make_dataloader(num_classes=5)}
+        val_ds = {"d1": _make_dataloader(num_classes=5)}
+
+        result = train(
+            tiny_model,
+            train_ds,
+            val_ds,
+            total_steps=4,
+            learning_rate=1e-3,
+            scheduler=None,
+            val_every_n_steps=4,
+            device="cpu",
+        )
+
+        assert isinstance(result, dict)
+
+    def test_invalid_scheduler_raises_value_error(self, tiny_model):
+        train_ds = {"d1": _make_dataloader(num_classes=5)}
+        val_ds = {"d1": _make_dataloader(num_classes=5)}
+
+        with pytest.raises(ValueError, match="Unknown scheduler"):
+            train(
+                tiny_model,
+                train_ds,
+                val_ds,
+                total_steps=1,
+                learning_rate=1e-3,
+                scheduler="bad_scheduler",
+            )
