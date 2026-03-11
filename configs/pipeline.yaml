@@ -10,7 +10,6 @@ data:
       - daimlerpedcls
       - dtd
       - gtsrb
-      - imagenet12
       - omniglot
       - svhn
       - ucf101

@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 import tensorflow as tf
 
-import slimmed_experts.data as data_module
 from slimmed_experts.data import (
     MOBILENET_INPUT_SIZE,
     VDD_DOMAINS,
@@ -22,10 +21,24 @@ def _make_ds(num_samples: int = 12, height: int = 32, width: int = 32, channels:
     return tf.data.Dataset.from_tensor_slices((images, labels))
 
 
+def _write_jpeg(path, height: int = 8, width: int = 8) -> None:
+    img = tf.cast(tf.random.uniform((height, width, 3), 0, 255), tf.uint8)
+    path.write_bytes(tf.image.encode_jpeg(img).numpy())
+
+
 @pytest.fixture()
-def mock_tfds_load(monkeypatch):
-    """Replace tfds.load with a function returning a small synthetic dataset."""
-    monkeypatch.setattr(data_module.tfds, "load", lambda *a, **kw: _make_ds())
+def data_dir(tmp_path):
+    """Create a minimal fake VDD directory structure with small JPEG images."""
+    for domain in VDD_DOMAINS:
+        for split in ("train", "val"):
+            for cls in ("0001", "0002"):
+                cls_dir = tmp_path / domain / split / cls
+                cls_dir.mkdir(parents=True)
+                _write_jpeg(cls_dir / "000001.jpg")
+        test_dir = tmp_path / domain / "test"
+        test_dir.mkdir(parents=True)
+        _write_jpeg(test_dir / "000001.jpg")
+    return tmp_path
 
 
 class TestPreprocessForMobilenet:
@@ -102,19 +115,19 @@ class TestLoadDomain:
         with pytest.raises(ValueError, match="Unknown domain"):
             load_domain("not_a_domain", "train")
 
-    def test_single_split_returns_dataset(self, mock_tfds_load):
-        result = load_domain("aircraft", "train")
+    def test_single_split_returns_dataset(self, data_dir):
+        result = load_domain("aircraft", "train", data_dir=data_dir)
         assert isinstance(result, tf.data.Dataset)
 
-    def test_multi_split_returns_dict(self, mock_tfds_load):
-        result = load_domain("aircraft", ["train", "test"])
+    def test_multi_split_returns_dict(self, data_dir):
+        result = load_domain("aircraft", ["train", "test"], data_dir=data_dir)
         assert isinstance(result, dict)
         assert set(result.keys()) == {"train", "test"}
         assert all(isinstance(v, tf.data.Dataset) for v in result.values())
 
-    def test_all_valid_domains_accepted(self, mock_tfds_load):
+    def test_all_valid_domains_accepted(self, data_dir):
         for domain in VDD_DOMAINS:
-            result = load_domain(domain, "train")
+            result = load_domain(domain, "train", data_dir=data_dir)
             assert isinstance(result, tf.data.Dataset)
 
 
@@ -123,12 +136,12 @@ class TestLoadDomains:
         with pytest.raises(ValueError, match="Unknown domain"):
             load_domains(["invalid_domain"], "train")
 
-    def test_returns_correct_keys(self, mock_tfds_load):
-        result = load_domains(["aircraft", "dtd"], "train")
+    def test_returns_correct_keys(self, data_dir):
+        result = load_domains(["aircraft", "dtd"], "train", data_dir=data_dir)
         assert set(result.keys()) == {"aircraft", "dtd"}
 
-    def test_multi_split_values_are_dicts(self, mock_tfds_load):
-        result = load_domains(["aircraft", "dtd"], ["train", "test"])
+    def test_multi_split_values_are_dicts(self, data_dir):
+        result = load_domains(["aircraft", "dtd"], ["train", "test"], data_dir=data_dir)
         for ds_dict in result.values():
             assert isinstance(ds_dict, dict)
             assert set(ds_dict.keys()) == {"train", "test"}

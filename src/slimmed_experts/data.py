@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import tensorflow as tf
-import tensorflow_datasets as tfds
 
 
 # MobileNetV2 expected input spatial size (height and width).
@@ -18,7 +18,6 @@ VDD_DOMAINS: list[str] = [
     "daimlerpedcls",
     "dtd",
     "gtsrb",
-    "imagenet12",
     "omniglot",
     "svhn",
     "ucf101",
@@ -99,20 +98,55 @@ def preprocess_domain(
     return ds
 
 
+def _load_split_from_dir(split_dir: str) -> tf.data.Dataset:
+    """Load images from a local split directory into a tf.data.Dataset.
+
+    For labeled splits (train/val): expects ``<split_dir>/<class_id>/<image>.jpg``.
+    For unlabeled splits (test): expects a flat ``<split_dir>/<image>.jpg``.
+    Labels are zero-indexed integers (sorted class-folder order) or ``-1`` for test.
+    """
+    entries = os.listdir(split_dir)
+    has_labels = any(os.path.isdir(os.path.join(split_dir, e)) for e in entries)
+
+    if has_labels:
+        class_dirs = sorted(e for e in entries if os.path.isdir(os.path.join(split_dir, e)))
+        paths: list[str] = []
+        labels: list[int] = []
+        for label_idx, class_dir in enumerate(class_dirs):
+            class_path = os.path.join(split_dir, class_dir)
+            for fname in sorted(os.listdir(class_path)):
+                if fname.lower().endswith(".jpg"):
+                    paths.append(os.path.join(class_path, fname))
+                    labels.append(label_idx)
+        path_ds = tf.data.Dataset.from_tensor_slices((paths, labels))
+        return path_ds.map(
+            lambda p, label: (tf.image.decode_jpeg(tf.io.read_file(p), channels=3), tf.cast(label, tf.int64)),
+            num_parallel_calls=tf.data.AUTOTUNE,
+        )
+    else:
+        paths = sorted(os.path.join(split_dir, f) for f in entries if f.lower().endswith(".jpg"))
+        path_ds = tf.data.Dataset.from_tensor_slices(paths)
+        return path_ds.map(
+            lambda p: (tf.image.decode_jpeg(tf.io.read_file(p), channels=3), tf.constant(-1, dtype=tf.int64)),
+            num_parallel_calls=tf.data.AUTOTUNE,
+        )
+
+
 def load_domain(
     domain: str,
     split: str | list[str],
     *,
     data_dir: str | os.PathLike[str] | None = None,
 ) -> tf.data.Dataset | dict[str, tf.data.Dataset]:
-    """Load a VDD domain from TFDS.
+    """Load a VDD domain from local files.
 
     Args:
         domain: Name of the VDD domain (e.g. ``"aircraft"``, ``"dtd"``). Must be
             in :data:`VDD_DOMAINS`.
-        split: A single TFDS split string (e.g. ``"train"``) or a list of split
+        split: A single split string (e.g. ``"train"``) or a list of split
             strings (e.g. ``["train", "test"]``).
-        data_dir: TFDS cache directory. Defaults to ``~/tensorflow_datasets/``.
+        data_dir: Root directory containing the domain folders. Defaults to
+            ``"data"``.
 
     Returns:
         A single ``tf.data.Dataset`` when *split* is a string, or a
@@ -130,10 +164,10 @@ def load_domain(
     if domain not in VDD_DOMAINS:
         raise ValueError(f"Unknown domain '{domain}'. Valid domains: {sorted(VDD_DOMAINS)}")
 
-    tfds_name = f"visual_domain_decathlon/{domain}"
+    base = Path(data_dir) if data_dir is not None else Path("data")
     if isinstance(split, list):
-        return {s: tfds.load(tfds_name, split=s, as_supervised=True, data_dir=data_dir) for s in split}
-    return tfds.load(tfds_name, split=split, as_supervised=True, data_dir=data_dir)
+        return {s: _load_split_from_dir(str(base / domain / s)) for s in split}
+    return _load_split_from_dir(str(base / domain / split))
 
 
 def load_domains(
@@ -142,15 +176,15 @@ def load_domains(
     *,
     data_dir: str | os.PathLike[str] | None = None,
 ) -> dict[str, tf.data.Dataset | dict[str, tf.data.Dataset]]:
-    """Load multiple VDD domains from TFDS.
+    """Load multiple VDD domains from local files.
 
     Convenience wrapper around :func:`load_domain` for multiple domains.
 
     Args:
         domains: List of domain names (e.g. ``["aircraft", "dtd"]``). Each entry
             must be in :data:`VDD_DOMAINS`.
-        split: A single TFDS split string or a list of split strings.
-        data_dir: TFDS cache directory.
+        split: A single split string or a list of split strings.
+        data_dir: Root directory containing the domain folders.
 
     Returns:
         ``dict[domain_name → dataset]`` where each value mirrors the return type
