@@ -12,33 +12,11 @@ import wandb
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import Dataset
+from torchvision.datasets import ImageFolder
 
 from slimmed_experts.data import VDD_DOMAINS, load_domain, make_dataloader
 from slimmed_experts.model import MobileNetV2MultiHead
 from slimmed_experts.train import train
-
-
-def _infer_num_classes(data_dir: Path, domain: str) -> int:
-    """Count the number of class subdirectories in a domain's train split.
-
-    Args:
-        data_dir: Root data directory.
-        domain: Domain name.
-
-    Returns:
-        Number of class folders found.
-
-    Raises:
-        FileNotFoundError: If the train split directory does not exist.
-        ValueError: If no class subdirectories are found.
-    """
-    train_dir = data_dir / domain / "train"
-    if not train_dir.is_dir():
-        raise FileNotFoundError(f"Train split directory not found: {train_dir}")
-    class_dirs = [e for e in os.listdir(train_dir) if (train_dir / e).is_dir()]
-    if not class_dirs:
-        raise ValueError(f"No class subdirectories found in {train_dir}")
-    return len(class_dirs)
 
 
 def run_pipeline(
@@ -68,9 +46,7 @@ def run_pipeline(
     """Run the full training pipeline end-to-end.
 
     Loads data for each domain, builds a :class:`~slimmed_experts.model.MobileNetV2MultiHead`
-    model, and trains it with :func:`~slimmed_experts.train.train`.  The number
-    of output classes per domain is inferred automatically by counting class
-    subdirectories in the ``train`` split.
+    model, and trains it with :func:`~slimmed_experts.train.train`.
 
     Args:
         domains: List of VDD domain names to train on (must be a subset of
@@ -102,7 +78,6 @@ def run_pipeline(
 
     Raises:
         ValueError: If any entry in *domains* is not in :data:`~slimmed_experts.data.VDD_DOMAINS`.
-        FileNotFoundError: If a domain's train split directory is missing.
     """
     invalid = [d for d in domains if d not in VDD_DOMAINS]
     if invalid:
@@ -110,20 +85,22 @@ def run_pipeline(
 
     resolved_data_dir = Path(data_dir) if data_dir is not None else Path("data")
 
-    # --- Infer num_classes per domain from the train split directory ---
-    logger.info("Inferring number of classes per domain...")
-    num_classes: dict[str, int] = {d: _infer_num_classes(resolved_data_dir, d) for d in domains}
-    logger.info(f"num_classes: {num_classes}")
-
     # --- Load and preprocess data ---
     logger.info("Loading and preprocessing datasets...")
+    _train_ds_raw: dict[str, ImageFolder] = {}
     train_datasets = {}
     val_datasets = {}
     for domain in domains:
-        train_ds = cast(Dataset, load_domain(domain, "train", data_dir=resolved_data_dir, augment=augment))
+        train_ds = cast(ImageFolder, load_domain(domain, "train", data_dir=resolved_data_dir, augment=augment))
         val_ds = cast(Dataset, load_domain(domain, "val", data_dir=resolved_data_dir))
+        _train_ds_raw[domain] = train_ds
         train_datasets[domain] = make_dataloader(train_ds, batch_size=batch_size, shuffle=shuffle, seed=seed)
         val_datasets[domain] = make_dataloader(val_ds, batch_size=batch_size)
+
+    # --- Infer num_classes per domain from the loaded train datasets ---
+    logger.info("Inferring number of classes per domain...")
+    num_classes: dict[str, int] = {d: len(_train_ds_raw[d].classes) for d in domains}
+    logger.info(f"num_classes: {num_classes}")
 
     # --- Build model ---
     logger.info(f"Building MobileNetV2MultiHead (width_mult={width_mult}, small_input={small_input})...")
