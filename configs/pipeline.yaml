@@ -22,8 +22,14 @@ data:
     seed: 42            # Random seed for reproducibility (null = no seed)
 
 model:
-  width_mult: 1.0
-  small_input: true     # Whether to set the first convolutional layer's stride to 1
+  backbone:
+    class_path: slimmed_experts.models.backbones.mobilenet_v2.MobileNetV2Backbone
+    args:
+      width_mult: 1.0
+      small_input: true
+  head:
+    class_path: slimmed_experts.models.heads.linear.LinearMultiHead
+    args: {}
 
 train:
   total_steps: 1000

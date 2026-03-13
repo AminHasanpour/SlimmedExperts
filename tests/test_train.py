@@ -1,4 +1,4 @@
-"""Tests for slimmed_experts.train."""
+"""Tests for slimmed_experts.train with plugin-based models."""
 
 from __future__ import annotations
 
@@ -7,7 +7,9 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from slimmed_experts.model import MobileNetV2MultiHead
+from slimmed_experts.models.backbones.mobilenet_v2 import MobileNetV2Backbone
+from slimmed_experts.models.heads.linear import LinearMultiHead
+from slimmed_experts.models.model import MultiHeadModel
 from slimmed_experts.train import _evaluate, _save_checkpoint, train
 
 # ---------------------------------------------------------------------------
@@ -36,13 +38,10 @@ def _make_dataloader(
 
 @pytest.fixture()
 def tiny_model():
-    """Tiny two-domain MobileNetV2 with small-input stride for 32x32 speed."""
-    return MobileNetV2MultiHead(
-        domains=["d1", "d2"],
-        num_classes={"d1": 5, "d2": 8},
-        width_mult=0.35,
-        small_input=True,
-    )
+    """Tiny two-domain composed model with MobileNetV2 + linear head."""
+    backbone = MobileNetV2Backbone(width_mult=0.35, small_input=True)
+    head = LinearMultiHead(["d1", "d2"], {"d1": 5, "d2": 8}, in_features=backbone.output_dim)
+    return MultiHeadModel(backbone=backbone, head=head)
 
 
 # ---------------------------------------------------------------------------
@@ -90,12 +89,9 @@ class TestSaveCheckpoint:
         _save_checkpoint(path, tiny_model, opt, step=1, metrics={})
 
         ckpt = torch.load(path, weights_only=True)
-        fresh = MobileNetV2MultiHead(
-            domains=["d1", "d2"],
-            num_classes={"d1": 5, "d2": 8},
-            width_mult=0.35,
-            small_input=True,
-        )
+        fresh_backbone = MobileNetV2Backbone(width_mult=0.35, small_input=True)
+        fresh_head = LinearMultiHead(["d1", "d2"], {"d1": 5, "d2": 8}, in_features=fresh_backbone.output_dim)
+        fresh = MultiHeadModel(backbone=fresh_backbone, head=fresh_head)
         fresh.load_state_dict(ckpt["model_state_dict"])  # must not raise
 
 

@@ -1,10 +1,10 @@
-"""End-to-end training pipeline for multi-domain MobileNetV2 models."""
+"""End-to-end training pipeline for multi-domain models."""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 
 import typer
 import torch
@@ -15,7 +15,7 @@ from torch.utils.data import Dataset
 from torchvision.datasets import ImageFolder
 
 from slimmed_experts.data import VDD_DOMAINS, load_domain, make_dataloader
-from slimmed_experts.model import MobileNetV2MultiHead
+from slimmed_experts.models import build_model
 from slimmed_experts.train import train
 
 
@@ -29,8 +29,10 @@ def run_pipeline(
     augment: bool = False,
     seed: int | None = None,
     # Model
-    width_mult: float = 1.0,
-    small_input: bool = False,
+    backbone_class_path: str = "slimmed_experts.models.backbones.mobilenet_v2.MobileNetV2Backbone",
+    backbone_args: dict[str, Any] | None = None,
+    head_class_path: str = "slimmed_experts.models.heads.linear.LinearMultiHead",
+    head_args: dict[str, Any] | None = None,
     # Training
     total_steps: int = 1000,
     learning_rate: float = 1e-3,
@@ -45,8 +47,8 @@ def run_pipeline(
 ) -> dict[str, float]:
     """Run the full training pipeline end-to-end.
 
-    Loads data for each domain, builds a :class:`~slimmed_experts.model.MobileNetV2MultiHead`
-    model, and trains it with :func:`~slimmed_experts.train.train`.
+    Loads data for each domain, builds a :class:`~slimmed_experts.models.model.MultiHeadModel`,
+    and trains it with :func:`~slimmed_experts.train.train`.
 
     Args:
         domains: List of VDD domain names to train on (must be a subset of
@@ -57,9 +59,10 @@ def run_pipeline(
         shuffle: Whether to shuffle the training split before batching.
         augment: If ``True``, applies random horizontal flips during training.
         seed: Random seed for reproducible data shuffling.
-        width_mult: MobileNetV2 width multiplier (e.g. 0.35, 0.5, 0.75, 1.0).
-        small_input: If ``True``, sets the first conv layer's stride to ``(1, 1)``
-            (useful for small-resolution datasets such as CIFAR-100).
+        backbone_class_path: Dotted import path to the backbone class.
+        backbone_args: Constructor arguments for the selected backbone.
+        head_class_path: Dotted import path to the head class.
+        head_args: Constructor arguments for the selected head.
         total_steps: Total number of gradient update steps across all domains.
         learning_rate: Optimizer learning rate.
         weight_decay: L2 regularisation coefficient.
@@ -103,12 +106,14 @@ def run_pipeline(
     logger.info(f"num_classes: {num_classes}")
 
     # --- Build model ---
-    logger.info(f"Building MobileNetV2MultiHead (width_mult={width_mult}, small_input={small_input})...")
-    model = MobileNetV2MultiHead(
+    logger.info(f"Building model from: backbone={backbone_class_path}, head={head_class_path}")
+    model = build_model(
         domains=domains,
         num_classes=num_classes,
-        width_mult=width_mult,
-        small_input=small_input,
+        backbone_class_path=backbone_class_path,
+        backbone_args=backbone_args,
+        head_class_path=head_class_path,
+        head_args=head_args,
     )
 
     # --- W&B ---
@@ -122,8 +127,8 @@ def run_pipeline(
             "shuffle": shuffle,
             "augment": augment,
             "seed": seed,
-            "width_mult": width_mult,
-            "small_input": small_input,
+            "backbone": {"class_path": backbone_class_path, "args": backbone_args or {}},
+            "head": {"class_path": head_class_path, "args": head_args or {}},
             "total_steps": total_steps,
             "learning_rate": learning_rate,
             "weight_decay": weight_decay,
@@ -169,6 +174,10 @@ def main(
     logger.add("logs/pipeline_{time}.log")
     logger.info(f"Loading pipeline config from {config}")
     cfg = cast(DictConfig, OmegaConf.load(config))
+    backbone_args_raw = OmegaConf.to_container(cfg.model.backbone.args, resolve=True)
+    head_args_raw = OmegaConf.to_container(cfg.model.head.args, resolve=True)
+    backbone_args = cast(dict[str, Any], backbone_args_raw or {})
+    head_args = cast(dict[str, Any], head_args_raw or {})
     kwargs = {
         "domains": list(cfg.data.load.domains),
         "data_dir": cfg.data.load.data_dir,
@@ -176,8 +185,10 @@ def main(
         "shuffle": cfg.data.preprocess.shuffle,
         "augment": cfg.data.preprocess.augment,
         "seed": cfg.data.preprocess.seed,
-        "width_mult": cfg.model.width_mult,
-        "small_input": cfg.model.small_input,
+        "backbone_class_path": cfg.model.backbone.class_path,
+        "backbone_args": backbone_args,
+        "head_class_path": cfg.model.head.class_path,
+        "head_args": head_args,
         "total_steps": cfg.train.total_steps,
         "learning_rate": cfg.train.learning_rate,
         "weight_decay": cfg.train.weight_decay,

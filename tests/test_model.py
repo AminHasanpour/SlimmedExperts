@@ -1,11 +1,13 @@
-"""Tests for slimmed_experts.model."""
+"""Tests for plugin-based model components and composition."""
 
 from __future__ import annotations
 
 import pytest
 import torch
 
-from slimmed_experts.model import MobileNetV2MultiHead
+from slimmed_experts.models.backbones.mobilenet_v2 import MobileNetV2Backbone
+from slimmed_experts.models.heads.linear import LinearMultiHead
+from slimmed_experts.models.model import MultiHeadModel
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -17,13 +19,10 @@ NUM_CLASSES = {"d1": 10, "d2": 20}
 
 @pytest.fixture()
 def model():
-    """Tiny MobileNetV2 with two heads, small images enabled for speed."""
-    return MobileNetV2MultiHead(
-        domains=DOMAINS,
-        num_classes=NUM_CLASSES,
-        width_mult=0.35,
-        small_input=True,
-    )
+    """Tiny composed model with MobileNetV2 backbone and linear multi-head."""
+    backbone = MobileNetV2Backbone(width_mult=0.35, small_input=True)
+    head = LinearMultiHead(DOMAINS, NUM_CLASSES, in_features=backbone.output_dim)
+    return MultiHeadModel(backbone=backbone, head=head)
 
 
 # ---------------------------------------------------------------------------
@@ -31,38 +30,29 @@ def model():
 # ---------------------------------------------------------------------------
 
 
-class TestMobileNetV2MultiHeadInit:
+class TestModelCompositionInit:
     def test_missing_num_classes_raises_value_error(self):
         with pytest.raises(ValueError, match="num_classes is missing entries"):
-            MobileNetV2MultiHead(
+            LinearMultiHead(
                 domains=["aircraft", "dtd"],
                 num_classes={"aircraft": 100},  # "dtd" missing
+                in_features=64,
             )
 
     def test_domains_property(self, model):
         assert model.domains == DOMAINS
 
     def test_small_input_sets_stride_to_one(self):
-        m = MobileNetV2MultiHead(
-            domains=["d1"],
-            num_classes={"d1": 5},
-            width_mult=0.35,
-            small_input=True,
-        )
+        backbone = MobileNetV2Backbone(width_mult=0.35, small_input=True)
         # features[0] is the first ConvBNActivation; [0] is its Conv2d.
-        assert m.backbone[0][0].stride == (1, 1)
+        assert backbone.features[0][0].stride == (1, 1)
 
     def test_default_input_keeps_stride_two(self):
-        m = MobileNetV2MultiHead(
-            domains=["d1"],
-            num_classes={"d1": 5},
-            width_mult=0.35,
-            small_input=False,
-        )
-        assert m.backbone[0][0].stride == (2, 2)
+        backbone = MobileNetV2Backbone(width_mult=0.35, small_input=False)
+        assert backbone.features[0][0].stride == (2, 2)
 
 
-class TestMobileNetV2MultiHeadForward:
+class TestModelCompositionForward:
     @pytest.mark.parametrize("domain", DOMAINS)
     def test_output_shape_per_domain(self, model, domain):
         x = torch.randn(2, 3, 32, 32)
@@ -80,23 +70,17 @@ class TestMobileNetV2MultiHeadForward:
             model(x, "not_a_domain")
 
     def test_different_num_classes_per_head(self):
-        m = MobileNetV2MultiHead(
-            domains=["a", "b"],
-            num_classes={"a": 5, "b": 50},
-            width_mult=0.35,
-            small_input=True,
-        )
+        backbone = MobileNetV2Backbone(width_mult=0.35, small_input=True)
+        head = LinearMultiHead(["a", "b"], {"a": 5, "b": 50}, in_features=backbone.output_dim)
+        m = MultiHeadModel(backbone=backbone, head=head)
         x = torch.randn(1, 3, 32, 32)
         assert m(x, "a").shape == (1, 5)
         assert m(x, "b").shape == (1, 50)
 
     def test_forward_with_small_input_32x32(self):
-        m = MobileNetV2MultiHead(
-            domains=["cifar"],
-            num_classes={"cifar": 100},
-            width_mult=0.35,
-            small_input=True,
-        )
+        backbone = MobileNetV2Backbone(width_mult=0.35, small_input=True)
+        head = LinearMultiHead(["cifar"], {"cifar": 100}, in_features=backbone.output_dim)
+        m = MultiHeadModel(backbone=backbone, head=head)
         x = torch.randn(4, 3, 32, 32)
         assert m(x, "cifar").shape == (4, 100)
 

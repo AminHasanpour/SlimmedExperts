@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 
 import typer
 from loguru import logger
@@ -40,6 +40,11 @@ def _config_to_pipeline_kwargs(cfg: DictConfig) -> dict:
     Returns:
         Dictionary of keyword arguments accepted by :func:`~slimmed_experts.pipeline.run_pipeline`.
     """
+    backbone_args_raw = OmegaConf.to_container(cfg.model.backbone.args, resolve=True)
+    head_args_raw = OmegaConf.to_container(cfg.model.head.args, resolve=True)
+    backbone_args = cast(dict[str, Any], backbone_args_raw or {})
+    head_args = cast(dict[str, Any], head_args_raw or {})
+
     return {
         "domains": list(cfg.data.load.domains),
         "data_dir": cfg.data.load.data_dir,
@@ -47,12 +52,15 @@ def _config_to_pipeline_kwargs(cfg: DictConfig) -> dict:
         "shuffle": cfg.data.preprocess.shuffle,
         "augment": cfg.data.preprocess.augment,
         "seed": cfg.data.preprocess.seed,
-        "width_mult": cfg.model.width_mult,
-        "small_input": cfg.model.small_input,
+        "backbone_class_path": cfg.model.backbone.class_path,
+        "backbone_args": backbone_args,
+        "head_class_path": cfg.model.head.class_path,
+        "head_args": head_args,
         "total_steps": cfg.train.total_steps,
         "learning_rate": cfg.train.learning_rate,
         "weight_decay": cfg.train.weight_decay,
         "optimizer": cfg.train.optimizer,
+        "scheduler": cfg.train.scheduler,
         "val_every_n_steps": cfg.train.val_every_n_steps,
         "output_dir": cfg.train.output_dir,
         "wandb_project": cfg.wandb.project,

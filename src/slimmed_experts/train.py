@@ -1,4 +1,4 @@
-"""Training loop for multi-domain MobileNetV2 models."""
+"""Training loop for multi-domain models."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from torch.optim import Adam, SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 
-from slimmed_experts.model import MultiHeadModel
+from slimmed_experts.models.model import MultiHeadModel
 
 
 def _save_checkpoint(
@@ -108,7 +108,7 @@ def train(
     *val_every_n_steps* steps.
 
     Args:
-        model: A :class:`~slimmed_experts.model.MultiHeadModel` instance.
+        model: A :class:`~slimmed_experts.models.model.MultiHeadModel` instance.
         train_datasets: Mapping ``{domain: DataLoader}`` for training.
         val_datasets: Mapping ``{domain: DataLoader}`` for validation.
         total_steps: Total number of gradient update steps across all domains.
