@@ -14,6 +14,10 @@ class TestLoadClass:
         cls = load_class("slimmed_experts.models.backbones.mobilenet_v2.MobileNetV2Backbone")
         assert issubclass(cls, Backbone)
 
+    def test_loads_slimnet_backbone(self):
+        cls = load_class("slimmed_experts.models.backbones.slimnet.SlimNetBackbone")
+        assert issubclass(cls, Backbone)
+
     def test_invalid_format_raises_value_error(self):
         with pytest.raises(ValueError, match="Invalid class_path"):
             load_class("not_a_valid_path")
@@ -56,6 +60,20 @@ class TestBuildModel:
                 head_class_path="slimmed_experts.models.heads.linear.LinearMultiHead",
                 head_args={},
             )
+
+    def test_builds_slimnet_model_and_runs_forward(self):
+        model = build_model(
+            domains=["d1", "d2"],
+            num_classes={"d1": 10, "d2": 20},
+            backbone_class_path="slimmed_experts.models.backbones.slimnet.SlimNetBackbone",
+            backbone_args={"width_mult": 0.5, "small_input": True},
+            head_class_path="slimmed_experts.models.heads.linear.LinearMultiHead",
+            head_args={},
+        )
+
+        x = torch.randn(2, 3, 74, 74)
+        assert model(x, "d1").shape == (2, 10)
+        assert model(x, "d2").shape == (2, 20)
 
     def test_head_must_inherit_multi_head_base(self):
         with pytest.raises(TypeError, match="must inherit"):

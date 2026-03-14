@@ -86,3 +86,45 @@ variants:
           width_mult: 1.0
     train:
       output_dir: models/general_1.0
+
+  - wandb:
+      run_name: slimnet_tiny
+    data:
+      load:
+        domains: [cifar100]
+    model:
+      backbone:
+        class_path: slimmed_experts.models.backbones.slimnet.SlimNetBackbone
+        args:
+          width_mult: 0.5
+          small_input: true
+    train:
+      output_dir: models/slimnet_tiny
+
+  - wandb:
+      run_name: slimnet_small
+    data:
+      load:
+        domains: [cifar100]
+    model:
+      backbone:
+        class_path: slimmed_experts.models.backbones.slimnet.SlimNetBackbone
+        args:
+          width_mult: 0.75
+          small_input: true
+    train:
+      output_dir: models/slimnet_small
+
+  - wandb:
+      run_name: slimnet_base
+    data:
+      load:
+        domains: [cifar100]
+    model:
+      backbone:
+        class_path: slimmed_experts.models.backbones.slimnet.SlimNetBackbone
+        args:
+          width_mult: 1.0
+          small_input: true
+    train:
+      output_dir: models/slimnet_base

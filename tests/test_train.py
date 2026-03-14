@@ -8,6 +8,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from slimmed_experts.models.backbones.mobilenet_v2 import MobileNetV2Backbone
+from slimmed_experts.models.backbones.slimnet import SlimNetBackbone
 from slimmed_experts.models.heads.linear import LinearMultiHead
 from slimmed_experts.models.model import MultiHeadModel
 from slimmed_experts.train import _evaluate, _save_checkpoint, train
@@ -301,3 +302,23 @@ class TestTrain:
                 learning_rate=1e-3,
                 scheduler="bad_scheduler",
             )
+
+    def test_slimnet_model_trains_for_short_run(self):
+        backbone = SlimNetBackbone(width_mult=0.5, small_input=True)
+        head = LinearMultiHead(["d1"], {"d1": 5}, in_features=backbone.output_dim)
+        model = MultiHeadModel(backbone=backbone, head=head)
+
+        train_ds = {"d1": _make_dataloader(num_classes=5, height=74, width=74)}
+        val_ds = {"d1": _make_dataloader(num_classes=5, height=74, width=74)}
+
+        result = train(
+            model,
+            train_ds,
+            val_ds,
+            total_steps=2,
+            learning_rate=1e-3,
+            val_every_n_steps=2,
+            device="cpu",
+        )
+
+        assert "acc/d1" in result

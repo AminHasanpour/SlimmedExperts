@@ -25,7 +25,7 @@ data:
 
 model:
   backbone:
-    class_path: slimmed_experts.models.backbones.mobilenet_v2.MobileNetV2Backbone
+    class_path: slimmed_experts.models.backbones.slimnet.SlimNetBackbone
     args:
       width_mult: 1.0
       small_input: true

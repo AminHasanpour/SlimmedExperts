@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from slimmed_experts.models.backbones.mobilenet_v2 import MobileNetV2Backbone
+from slimmed_experts.models.backbones.slimnet import SlimNetBackbone
 from slimmed_experts.models.heads.linear import LinearMultiHead
 from slimmed_experts.models.model import MultiHeadModel
 
@@ -51,6 +52,26 @@ class TestModelCompositionInit:
         backbone = MobileNetV2Backbone(width_mult=0.35, small_input=False)
         assert backbone.features[0][0].stride == (2, 2)
 
+    def test_slimnet_small_input_sets_stride_to_one(self):
+        backbone = SlimNetBackbone(width_mult=0.5, small_input=True)
+        assert backbone.features[0][0].stride == (1, 1)
+
+    def test_slimnet_default_presets_include_all_tiers(self):
+        presets = SlimNetBackbone.tier_presets()
+        assert set(presets.keys()) == {"tiny", "small", "base"}
+        assert presets["tiny"] < presets["small"] < presets["base"]
+
+    def test_slimnet_width_mult_increases_parameter_count(self):
+        tiny = SlimNetBackbone(width_mult=0.5, small_input=True)
+        small = SlimNetBackbone(width_mult=0.75, small_input=True)
+        base = SlimNetBackbone(width_mult=1.0, small_input=True)
+
+        tiny_params = sum(p.numel() for p in tiny.parameters())
+        small_params = sum(p.numel() for p in small.parameters())
+        base_params = sum(p.numel() for p in base.parameters())
+
+        assert tiny_params < small_params < base_params
+
 
 class TestModelCompositionForward:
     @pytest.mark.parametrize("domain", DOMAINS)
@@ -88,3 +109,10 @@ class TestModelCompositionForward:
         x = torch.randn(1, 3, 32, 32)
         logits = model(x, "d1")
         assert logits.shape == (1, NUM_CLASSES["d1"])
+
+    def test_slimnet_forward_with_74x74_input(self):
+        backbone = SlimNetBackbone(width_mult=0.75, small_input=True)
+        head = LinearMultiHead(["cifar"], {"cifar": 100}, in_features=backbone.output_dim)
+        m = MultiHeadModel(backbone=backbone, head=head)
+        x = torch.randn(4, 3, 74, 74)
+        assert m(x, "cifar").shape == (4, 100)
