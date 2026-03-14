@@ -6,12 +6,13 @@ import os
 import tarfile
 import tempfile
 import urllib.request
+from collections.abc import Sized
 from pathlib import Path
 
 import torch
 from loguru import logger
 from PIL import Image
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
 
@@ -34,6 +35,13 @@ VDD_DOMAINS: list[str] = [
 
 # URL to download the full VDD dataset archive.
 _VDD_DOWNLOAD_URL: str = "http://www.robots.ox.ac.uk/~vgg/share/decathlon-1.0-data.tar.gz"
+
+# Maximum number of training samples used to estimate normalization stats.
+# Set to None to use the full training split.
+_NORMALIZATION_MAX_SAMPLES: int | None = 4096
+
+# Fixed seed for deterministic random sampling when limiting normalization data.
+_NORMALIZATION_SAMPLING_SEED: int = 42
 
 
 def _ensure_domains(data_dir: Path, domains: list[str]) -> None:
@@ -173,6 +181,13 @@ def _compute_normalization_stats(data_dir: Path, domain: str, input_size: int) -
     """
     train_split_dir = data_dir / domain / "train"
     dataset = _load_split(train_split_dir, _build_transform(input_size, augment=False))
+
+    assert isinstance(dataset, Sized), "Dataset must have a finite length to compute normalization stats."
+    if _NORMALIZATION_MAX_SAMPLES is not None and len(dataset) > _NORMALIZATION_MAX_SAMPLES:
+        generator = torch.Generator().manual_seed(_NORMALIZATION_SAMPLING_SEED)
+        indices = torch.randperm(len(dataset), generator=generator)[:_NORMALIZATION_MAX_SAMPLES].tolist()
+        dataset = Subset(dataset, indices)
+
     loader = DataLoader(dataset, batch_size=64, shuffle=False, num_workers=0)
 
     channel_sum = torch.zeros(3)

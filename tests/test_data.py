@@ -8,10 +8,12 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
+from slimmed_experts import data as data_module
 from slimmed_experts.data import (
     DEFAULT_INPUT_SIZE,
     VDD_DOMAINS,
     _build_transform,
+    _compute_normalization_stats,
     _load_domain,
     load_domains,
     make_dataloader,
@@ -139,6 +141,62 @@ class TestLoadDomain:
         ds = _load_domain("aircraft", ["train"], data_dir=data_dir, normalize=True)["train"]
         image, _ = ds[0]
         assert torch.isfinite(image).all()
+
+
+class TestNormalizationStatsSampling:
+    @staticmethod
+    def _write_constant_rgb(path, value: int) -> None:
+        img = Image.fromarray(np.full((8, 8, 3), value, dtype=np.uint8))
+        img.save(path)
+
+    def test_uses_random_subset_when_max_samples_is_set(self, tmp_path, monkeypatch):
+        train_dir = tmp_path / "toy" / "train"
+        for cls in ("0001", "0002"):
+            (train_dir / cls).mkdir(parents=True)
+
+        # Dataset order in ImageFolder is class-sorted then filename-sorted.
+        values = [0, 64, 128, 255]
+        self._write_constant_rgb(train_dir / "0001" / "a.jpg", values[0])
+        self._write_constant_rgb(train_dir / "0001" / "b.jpg", values[1])
+        self._write_constant_rgb(train_dir / "0002" / "a.jpg", values[2])
+        self._write_constant_rgb(train_dir / "0002" / "b.jpg", values[3])
+
+        monkeypatch.setattr(data_module, "_NORMALIZATION_MAX_SAMPLES", 2)
+        monkeypatch.setattr(data_module, "_NORMALIZATION_SAMPLING_SEED", 7)
+
+        mean, std = _compute_normalization_stats(tmp_path, "toy", input_size=8)
+
+        generator = torch.Generator().manual_seed(7)
+        sampled_idx = torch.randperm(4, generator=generator)[:2]
+        selected = torch.tensor([values[i] / 255.0 for i in sampled_idx], dtype=torch.float32)
+
+        expected_mean = float(selected.mean())
+        expected_std = float(torch.sqrt(torch.clamp((selected * selected).mean() - (selected.mean() ** 2), min=1e-12)))
+
+        assert mean == pytest.approx([expected_mean, expected_mean, expected_mean], abs=1e-6)
+        assert std == pytest.approx([expected_std, expected_std, expected_std], abs=1e-6)
+
+    def test_uses_full_dataset_when_max_samples_is_none(self, tmp_path, monkeypatch):
+        train_dir = tmp_path / "toy" / "train"
+        for cls in ("0001", "0002"):
+            (train_dir / cls).mkdir(parents=True)
+
+        values = [0, 64, 128, 255]
+        self._write_constant_rgb(train_dir / "0001" / "a.jpg", values[0])
+        self._write_constant_rgb(train_dir / "0001" / "b.jpg", values[1])
+        self._write_constant_rgb(train_dir / "0002" / "a.jpg", values[2])
+        self._write_constant_rgb(train_dir / "0002" / "b.jpg", values[3])
+
+        monkeypatch.setattr(data_module, "_NORMALIZATION_MAX_SAMPLES", None)
+
+        mean, std = _compute_normalization_stats(tmp_path, "toy", input_size=8)
+
+        full = torch.tensor([v / 255.0 for v in values], dtype=torch.float32)
+        expected_mean = float(full.mean())
+        expected_std = float(torch.sqrt(torch.clamp((full * full).mean() - (full.mean() ** 2), min=1e-12)))
+
+        assert mean == pytest.approx([expected_mean, expected_mean, expected_mean], abs=1e-6)
+        assert std == pytest.approx([expected_std, expected_std, expected_std], abs=1e-6)
 
 
 class TestLoadDomains:
