@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import math
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,6 @@ import torch
 import torch.nn as nn
 from loguru import logger
 from torch.optim import Adam, SGD
-from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 
 from slimmed_experts.models.model import MultiHeadModel
@@ -95,6 +95,8 @@ def train(
     weight_decay: float = 0.0,
     optimizer: str = "adam",
     scheduler: str | None = "cosine",
+    warmup_steps: int = 0,
+    label_smoothing: float = 0.0,
     val_every_n_steps: int = 100,
     output_dir: str | Path | None = None,
     wandb_run: Any | None = None,
@@ -115,9 +117,11 @@ def train(
         learning_rate: Optimizer learning rate.
         weight_decay: L2 regularisation coefficient.
         optimizer: ``"adam"`` or ``"sgd"``.
-        scheduler: LR scheduler to use. ``"cosine"`` uses
-            :class:`~torch.optim.lr_scheduler.CosineAnnealingLR` with
-            ``T_max=total_steps``. Pass ``None`` to disable the scheduler.
+        scheduler: LR scheduler to use after warmup (``"cosine"`` or ``None``).
+        warmup_steps: Number of warmup steps. Learning rate increases linearly
+            from 0 to ``learning_rate`` over this many initial steps.
+        label_smoothing: Label smoothing for
+            :class:`~torch.nn.CrossEntropyLoss`.
         val_every_n_steps: Run validation every this many steps.
         output_dir: Directory to write ``best.pt`` and ``last.pt``.  ``None``
             disables checkpoint saving.
@@ -132,7 +136,14 @@ def train(
     Raises:
         ValueError: If *optimizer* is not ``"adam"`` or ``"sgd"``.
         ValueError: If *scheduler* is not ``"cosine"`` or ``None``.
+        ValueError: If *warmup_steps* is negative or exceeds *total_steps*.
+        ValueError: If *label_smoothing* is not in ``[0.0, 1.0)``.
     """
+    if warmup_steps < 0 or warmup_steps > total_steps:
+        raise ValueError(f"warmup_steps must be in [0, total_steps]. Got {warmup_steps}.")
+    if label_smoothing < 0.0 or label_smoothing >= 1.0:
+        raise ValueError(f"label_smoothing must be in [0.0, 1.0). Got {label_smoothing}.")
+
     device_ = torch.device(device)
     model = model.to(device_)
     domains = list(train_datasets.keys())
@@ -141,19 +152,39 @@ def train(
     if optimizer == "adam":
         opt: torch.optim.Optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     elif optimizer == "sgd":
-        opt = SGD(model.parameters(), lr=learning_rate, momentum=0.9, weight_decay=weight_decay)
+        opt = SGD(
+            model.parameters(),
+            lr=learning_rate,
+            momentum=0.9,
+            weight_decay=weight_decay,
+            nesterov=True,
+        )
     else:
         raise ValueError(f"Unknown optimizer '{optimizer}'. Choose 'adam' or 'sgd'.")
 
-    # --- LR scheduler ---
-    if scheduler == "cosine":
-        sched: torch.optim.lr_scheduler.LRScheduler | None = CosineAnnealingLR(opt, T_max=total_steps)
-    elif scheduler is None:
-        sched = None
-    else:
+    if scheduler not in {"cosine", None}:
         raise ValueError(f"Unknown scheduler '{scheduler}'. Choose 'cosine' or None.")
 
-    criterion = nn.CrossEntropyLoss()
+    if warmup_steps > 0:
+        for group in opt.param_groups:
+            group["lr"] = 0.0
+
+    def _lr_at_step(step_idx: int) -> float:
+        if warmup_steps > 0 and step_idx <= warmup_steps:
+            return learning_rate * (step_idx / warmup_steps)
+
+        if scheduler is None:
+            return learning_rate
+
+        if total_steps == warmup_steps:
+            return learning_rate
+
+        decay_steps = total_steps - warmup_steps
+        progress = (step_idx - warmup_steps) / decay_steps
+        progress = min(max(progress, 0.0), 1.0)
+        return learning_rate * 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
 
     # --- Output directory ---
     out: Path | None = None
@@ -181,8 +212,10 @@ def train(
         loss = criterion(logits, labels)
         loss.backward()
         opt.step()
-        if sched is not None:
-            sched.step()
+        if warmup_steps > 0 or scheduler == "cosine":
+            new_lr = _lr_at_step(step)
+            for group in opt.param_groups:
+                group["lr"] = new_lr
 
         with torch.no_grad():
             preds = logits.argmax(dim=1)

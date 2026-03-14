@@ -37,6 +37,8 @@ def test_config_to_pipeline_kwargs_maps_plugin_fields() -> None:
                 "weight_decay": 0.0,
                 "optimizer": "adam",
                 "scheduler": "cosine",
+                "warmup_steps": 2,
+                "label_smoothing": 0.1,
                 "val_every_n_steps": 1,
                 "output_dir": None,
                 "device": "cpu",
@@ -54,3 +56,5 @@ def test_config_to_pipeline_kwargs_maps_plugin_fields() -> None:
     assert kwargs["input_size"] == 74
     assert kwargs["normalize"] is False
     assert kwargs["scheduler"] == "cosine"
+    assert kwargs["warmup_steps"] == 2
+    assert kwargs["label_smoothing"] == 0.1

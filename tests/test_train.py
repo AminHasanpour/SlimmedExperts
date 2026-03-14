@@ -289,6 +289,41 @@ class TestTrain:
 
         assert isinstance(result, dict)
 
+    def test_warmup_with_cosine_scheduler_runs_successfully(self, tiny_model):
+        train_ds = {"d1": _make_dataloader(num_classes=5)}
+        val_ds = {"d1": _make_dataloader(num_classes=5)}
+
+        result = train(
+            tiny_model,
+            train_ds,
+            val_ds,
+            total_steps=4,
+            learning_rate=1e-3,
+            scheduler="cosine",
+            warmup_steps=2,
+            val_every_n_steps=4,
+            device="cpu",
+        )
+
+        assert isinstance(result, dict)
+
+    def test_label_smoothing_runs_successfully(self, tiny_model):
+        train_ds = {"d1": _make_dataloader(num_classes=5)}
+        val_ds = {"d1": _make_dataloader(num_classes=5)}
+
+        result = train(
+            tiny_model,
+            train_ds,
+            val_ds,
+            total_steps=2,
+            learning_rate=1e-3,
+            label_smoothing=0.1,
+            val_every_n_steps=2,
+            device="cpu",
+        )
+
+        assert isinstance(result, dict)
+
     def test_invalid_scheduler_raises_value_error(self, tiny_model):
         train_ds = {"d1": _make_dataloader(num_classes=5)}
         val_ds = {"d1": _make_dataloader(num_classes=5)}
@@ -301,6 +336,34 @@ class TestTrain:
                 total_steps=1,
                 learning_rate=1e-3,
                 scheduler="bad_scheduler",
+            )
+
+    def test_invalid_warmup_steps_raises_value_error(self, tiny_model):
+        train_ds = {"d1": _make_dataloader(num_classes=5)}
+        val_ds = {"d1": _make_dataloader(num_classes=5)}
+
+        with pytest.raises(ValueError, match="warmup_steps"):
+            train(
+                tiny_model,
+                train_ds,
+                val_ds,
+                total_steps=2,
+                learning_rate=1e-3,
+                warmup_steps=3,
+            )
+
+    def test_invalid_label_smoothing_raises_value_error(self, tiny_model):
+        train_ds = {"d1": _make_dataloader(num_classes=5)}
+        val_ds = {"d1": _make_dataloader(num_classes=5)}
+
+        with pytest.raises(ValueError, match="label_smoothing"):
+            train(
+                tiny_model,
+                train_ds,
+                val_ds,
+                total_steps=2,
+                learning_rate=1e-3,
+                label_smoothing=1.0,
             )
 
     def test_slimnet_model_trains_for_short_run(self):

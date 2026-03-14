@@ -63,6 +63,8 @@ def _config_to_pipeline_kwargs(cfg: DictConfig) -> dict:
         "weight_decay": cfg.train.weight_decay,
         "optimizer": cfg.train.optimizer,
         "scheduler": cfg.train.scheduler,
+        "warmup_steps": cfg.train.warmup_steps,
+        "label_smoothing": cfg.train.label_smoothing,
         "val_every_n_steps": cfg.train.val_every_n_steps,
         "output_dir": cfg.train.output_dir,
         "wandb_project": cfg.wandb.project,
