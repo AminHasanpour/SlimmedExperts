@@ -16,8 +16,8 @@ from torchvision import transforms
 from torchvision.datasets import ImageFolder
 
 
-# MobileNetV2 expected input spatial size (height and width).
-MOBILENET_INPUT_SIZE: int = 74
+# Default square input size used by image transforms.
+DEFAULT_INPUT_SIZE: int = 74
 
 # List of valid VDD domains.
 VDD_DOMAINS: list[str] = [
@@ -34,10 +34,6 @@ VDD_DOMAINS: list[str] = [
 
 # URL to download the full VDD dataset archive.
 _VDD_DOWNLOAD_URL: str = "http://www.robots.ox.ac.uk/~vgg/share/decathlon-1.0-data.tar.gz"
-
-# ImageNet channel-wise mean and std used by TorchVision MobileNetV2.
-_IMAGENET_MEAN: list[float] = [0.485, 0.456, 0.406]
-_IMAGENET_STD: list[float] = [0.229, 0.224, 0.225]
 
 
 def _ensure_domains(data_dir: Path, domains: list[str]) -> None:
@@ -77,51 +73,47 @@ def _ensure_domains(data_dir: Path, domains: list[str]) -> None:
     logger.info("Download and extraction complete.")
 
 
-def mobilenet_transform(augment: bool = False) -> transforms.Compose:
-    """Return the MobileNetV2 preprocessing transform.
-
-    Resizes to ``(MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE)``, optionally
-    applies a suite of data augmentations, converts to a ``float32`` tensor,
-    and normalises with ImageNet channel-wise mean and standard deviation
-    (``mean=[0.485, 0.456, 0.406]``, ``std=[0.229, 0.224, 0.225]``).
-
-    When *augment* is ``True``, the following transforms are applied before
-    normalisation:
-
-    * Resize to 15 % larger than target, then :class:`~torchvision.transforms.RandomCrop`
-      to ``MOBILENET_INPUT_SIZE`` (random crop augmentation).
-    * :class:`~torchvision.transforms.RandomHorizontalFlip` (p=0.5).
-    * :class:`~torchvision.transforms.ColorJitter` (brightness, contrast,
-      saturation ±0.3, hue ±0.1).
-    * :class:`~torchvision.transforms.RandomRotation` (±15°).
-    * :class:`~torchvision.transforms.RandomErasing` (p=0.25) applied after
-      tensor conversion.
+def _build_transform(
+    input_size: int,
+    *,
+    augment: bool = False,
+    mean: list[float] | None = None,
+    std: list[float] | None = None,
+) -> transforms.Compose:
+    """Build an image transform for a target input size.
 
     Args:
-        augment: If ``True``, applies the full augmentation suite described above.
+        input_size: Target square image size after preprocessing.
+        augment: If ``True``, applies train-time augmentation.
+        mean: Per-channel mean for normalisation. If ``None``, no normalisation.
+        std: Per-channel standard deviation for normalisation. If ``None``, no normalisation.
 
     Returns:
-        A ``torchvision.transforms.Compose`` transform ready to apply to PIL images.
+        A ``torchvision.transforms.Compose`` transform.
     """
-    _larger = int(MOBILENET_INPUT_SIZE * 1.15)
+    larger = int(input_size * 1.15)
+    ops: list[transforms.Transform] = []
+
     if augment:
-        t: list = [
-            transforms.Resize((_larger, _larger)),
-            transforms.RandomCrop(MOBILENET_INPUT_SIZE),
-            transforms.RandomHorizontalFlip(),
-            transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
-            transforms.RandomRotation(15),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=_IMAGENET_MEAN, std=_IMAGENET_STD),
-            transforms.RandomErasing(p=0.25),
-        ]
+        ops.extend(
+            [
+                transforms.Resize((larger, larger)),
+                transforms.RandomCrop(input_size),
+                transforms.RandomHorizontalFlip(),
+                transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
+                transforms.RandomRotation(15),
+            ]
+        )
     else:
-        t = [
-            transforms.Resize((MOBILENET_INPUT_SIZE, MOBILENET_INPUT_SIZE)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=_IMAGENET_MEAN, std=_IMAGENET_STD),
-        ]
-    return transforms.Compose(t)
+        ops.append(transforms.Resize((input_size, input_size)))
+
+    ops.append(transforms.ToTensor())
+    if mean is not None and std is not None:
+        ops.append(transforms.Normalize(mean=mean, std=std))
+    if augment:
+        ops.append(transforms.RandomErasing(p=0.25))
+
+    return transforms.Compose(ops)
 
 
 class _FlatImageDataset(Dataset):
@@ -163,6 +155,44 @@ def _load_split(split_dir: Path, transform: transforms.Compose) -> Dataset:
     return _FlatImageDataset(image_paths, transform=transform)
 
 
+def _compute_normalization_stats(data_dir: Path, domain: str, input_size: int) -> tuple[list[float], list[float]]:
+    """Compute per-channel mean and std from a domain's training split.
+
+    Statistics are computed after resizing and converting to tensors in [0, 1].
+
+    Args:
+        data_dir: Root data directory.
+        domain: Domain name.
+        input_size: Target square image size.
+
+    Returns:
+        Tuple ``(mean, std)`` where each is a list of 3 floats.
+
+    Raises:
+        ValueError: If the training split has no samples.
+    """
+    train_split_dir = data_dir / domain / "train"
+    dataset = _load_split(train_split_dir, _build_transform(input_size, augment=False))
+    loader = DataLoader(dataset, batch_size=64, shuffle=False, num_workers=0)
+
+    channel_sum = torch.zeros(3)
+    channel_sq_sum = torch.zeros(3)
+    total_pixels = 0
+
+    for images, _ in loader:
+        channel_sum += images.sum(dim=(0, 2, 3))
+        channel_sq_sum += (images * images).sum(dim=(0, 2, 3))
+        total_pixels += images.size(0) * images.size(2) * images.size(3)
+
+    if total_pixels == 0:
+        raise ValueError(f"Training split for domain '{domain}' has no images.")
+
+    mean = channel_sum / total_pixels
+    var = (channel_sq_sum / total_pixels) - (mean * mean)
+    std = torch.sqrt(torch.clamp(var, min=1e-12))
+    return mean.tolist(), std.tolist()
+
+
 def make_dataloader(
     dataset: Dataset,
     *,
@@ -188,67 +218,101 @@ def make_dataloader(
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, generator=generator)
 
 
-def load_domain(
+def _load_domain(
     domain: str,
-    split: str | list[str],
+    split: list[str],
     *,
     data_dir: str | os.PathLike[str] | None = None,
     augment: bool = False,
-) -> Dataset | dict[str, Dataset]:
-    """Load a VDD domain from local files, downloading first if necessary.
+    input_size: int = DEFAULT_INPUT_SIZE,
+    normalize: bool = False,
+) -> dict[str, Dataset]:
+    """Load selected splits for one VDD domain.
 
     Args:
         domain: Name of the VDD domain (e.g. ``"aircraft"``). Must be in
             :data:`VDD_DOMAINS`.
-        split: A single split string (e.g. ``"train"``) or a list of split
-            strings (e.g. ``["train", "val"]``).
+        split: Split names to load (e.g. ``["train", "val"]``).
         data_dir: Root directory containing the domain folders. Defaults to
             ``"data"``.
-        augment: If ``True``, applies random horizontal flips. Pass ``False``
-            for validation and test splits.
+        augment: If ``True``, applies train-time augmentation to the ``"train"`` split.
+        input_size: Target square image size after preprocessing.
+        normalize: If ``True``, compute per-domain normalisation statistics from
+            the training split and apply them to all requested splits.
 
     Returns:
-        A single ``Dataset`` when *split* is a string, or a
-        ``dict[split_name → Dataset]`` when *split* is a list.
+        ``dict[split_name, Dataset]``.
 
     Raises:
         ValueError: If *domain* is not found in :data:`VDD_DOMAINS`.
     """
     if domain not in VDD_DOMAINS:
         raise ValueError(f"Unknown domain '{domain}'. Valid domains: {sorted(VDD_DOMAINS)}")
+    if not isinstance(split, list):
+        raise TypeError("split must be a list of split names.")
+    if not split:
+        raise ValueError("split must contain at least one split name.")
+    if any(not isinstance(s, str) for s in split):
+        raise TypeError("split must contain only strings.")
 
     base = Path(data_dir) if data_dir is not None else Path("data")
     _ensure_domains(base, [domain])
-    transform = mobilenet_transform(augment)
-    if isinstance(split, list):
-        return {s: _load_split(base / domain / s, transform) for s in split}
-    return _load_split(base / domain / split, transform)
+
+    mean: list[float] | None = None
+    std: list[float] | None = None
+    if normalize:
+        mean, std = _compute_normalization_stats(base, domain, input_size)
+        logger.debug(f"Computed normalization stats for domain '{domain}': mean={mean}, std={std}")
+
+    datasets: dict[str, Dataset] = {}
+    for split_name in split:
+        split_augment = augment and split_name == "train"
+        transform = _build_transform(input_size, augment=split_augment, mean=mean, std=std)
+        datasets[split_name] = _load_split(base / domain / split_name, transform)
+    return datasets
 
 
 def load_domains(
     domains: list[str],
-    split: str | list[str],
+    split: list[str],
     *,
     data_dir: str | os.PathLike[str] | None = None,
     augment: bool = False,
-) -> dict[str, Dataset | dict[str, Dataset]]:
+    input_size: int = DEFAULT_INPUT_SIZE,
+    normalize: bool = False,
+) -> dict[str, dict[str, Dataset]]:
     """Load multiple VDD domains from local files, downloading first if necessary.
 
-    Convenience wrapper around :func:`load_domain` for multiple domains.
+    Convenience wrapper around :func:`_load_domain` for multiple domains.
 
     Args:
         domains: List of domain names (e.g. ``["aircraft", "dtd"]``). Each entry
             must be in :data:`VDD_DOMAINS`.
-        split: A single split string or a list of split strings.
+        split: Split names to load (e.g. ``["train", "val"]``).
         data_dir: Root directory containing the domain folders. Defaults to
             ``"data"``.
-        augment: If ``True``, applies random horizontal flips.
+        augment: If ``True``, applies train-time augmentation to the ``"train"`` split.
+        input_size: Target square image size after preprocessing.
+        normalize: If ``True``, normalise using per-domain statistics computed
+            from each domain's training split.
 
     Returns:
-        ``dict[domain_name → dataset]`` where each value mirrors the return type
-        of :func:`load_domain`.
+        ``dict[domain_name, dict[split_name, Dataset]]``.
 
     Raises:
         ValueError: If any entry in *domains* is not found in :data:`VDD_DOMAINS`.
     """
-    return {domain: load_domain(domain, split, data_dir=data_dir, augment=augment) for domain in domains}
+    if not isinstance(split, list):
+        raise TypeError("split must be a list of split names.")
+
+    return {
+        domain: _load_domain(
+            domain,
+            split,
+            data_dir=data_dir,
+            augment=augment,
+            input_size=input_size,
+            normalize=normalize,
+        )
+        for domain in domains
+    }

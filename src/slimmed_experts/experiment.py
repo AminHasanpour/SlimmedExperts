@@ -51,6 +51,8 @@ def _config_to_pipeline_kwargs(cfg: DictConfig) -> dict:
         "batch_size": cfg.data.preprocess.batch_size,
         "shuffle": cfg.data.preprocess.shuffle,
         "augment": cfg.data.preprocess.augment,
+        "input_size": cfg.data.preprocess.input_size,
+        "normalize": cfg.data.preprocess.normalize,
         "seed": cfg.data.preprocess.seed,
         "backbone_class_path": cfg.model.backbone.class_path,
         "backbone_args": backbone_args,

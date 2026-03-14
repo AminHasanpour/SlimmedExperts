@@ -12,7 +12,14 @@ def test_config_to_pipeline_kwargs_maps_plugin_fields() -> None:
         {
             "data": {
                 "load": {"domains": ["d1"], "data_dir": "data"},
-                "preprocess": {"batch_size": 4, "shuffle": True, "augment": False, "seed": 42},
+                "preprocess": {
+                    "batch_size": 4,
+                    "shuffle": True,
+                    "augment": False,
+                    "input_size": 74,
+                    "normalize": False,
+                    "seed": 42,
+                },
             },
             "model": {
                 "backbone": {
@@ -44,4 +51,6 @@ def test_config_to_pipeline_kwargs_maps_plugin_fields() -> None:
     assert kwargs["head_class_path"] == cfg.model.head.class_path
     assert kwargs["backbone_args"] == {"width_mult": 0.35, "small_input": True}
     assert kwargs["head_args"] == {}
+    assert kwargs["input_size"] == 74
+    assert kwargs["normalize"] is False
     assert kwargs["scheduler"] == "cosine"

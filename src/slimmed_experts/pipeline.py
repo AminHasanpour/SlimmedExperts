@@ -14,7 +14,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import Dataset
 from torchvision.datasets import ImageFolder
 
-from slimmed_experts.data import VDD_DOMAINS, load_domain, make_dataloader
+from slimmed_experts.data import VDD_DOMAINS, load_domains, make_dataloader
 from slimmed_experts.models import build_model
 from slimmed_experts.train import train
 
@@ -27,6 +27,8 @@ def run_pipeline(
     batch_size: int = 32,
     shuffle: bool = True,
     augment: bool = False,
+    input_size: int = 74,
+    normalize: bool = False,
     seed: int | None = None,
     # Model
     backbone_class_path: str = "slimmed_experts.models.backbones.mobilenet_v2.MobileNetV2Backbone",
@@ -57,7 +59,10 @@ def run_pipeline(
             ``"data"``.
         batch_size: Number of samples per batch.
         shuffle: Whether to shuffle the training split before batching.
-        augment: If ``True``, applies random horizontal flips during training.
+        augment: If ``True``, applies train-time augmentation to train split.
+        input_size: Target square image size used by preprocessing transforms.
+        normalize: If ``True``, normalise inputs using per-domain statistics
+            computed from each domain's training split.
         seed: Random seed for reproducible data shuffling.
         backbone_class_path: Dotted import path to the backbone class.
         backbone_args: Constructor arguments for the selected backbone.
@@ -90,19 +95,24 @@ def run_pipeline(
 
     # --- Load and preprocess data ---
     logger.info("Loading and preprocessing datasets...")
-    _train_ds_raw: dict[str, ImageFolder] = {}
+    loaded = load_domains(
+        domains,
+        ["train", "val"],
+        data_dir=resolved_data_dir,
+        augment=augment,
+        input_size=input_size,
+        normalize=normalize,
+    )
+    num_classes: dict[str, int] = {}
     train_datasets = {}
     val_datasets = {}
     for domain in domains:
-        train_ds = cast(ImageFolder, load_domain(domain, "train", data_dir=resolved_data_dir, augment=augment))
-        val_ds = cast(Dataset, load_domain(domain, "val", data_dir=resolved_data_dir))
-        _train_ds_raw[domain] = train_ds
+        train_ds = cast(ImageFolder, loaded[domain]["train"])
+        val_ds = cast(Dataset, loaded[domain]["val"])
+        num_classes[domain] = len(train_ds.classes)
         train_datasets[domain] = make_dataloader(train_ds, batch_size=batch_size, shuffle=shuffle, seed=seed)
         val_datasets[domain] = make_dataloader(val_ds, batch_size=batch_size)
 
-    # --- Infer num_classes per domain from the loaded train datasets ---
-    logger.info("Inferring number of classes per domain...")
-    num_classes: dict[str, int] = {d: len(_train_ds_raw[d].classes) for d in domains}
     logger.info(f"num_classes: {num_classes}")
 
     # --- Build model ---
@@ -126,6 +136,8 @@ def run_pipeline(
             "batch_size": batch_size,
             "shuffle": shuffle,
             "augment": augment,
+            "input_size": input_size,
+            "normalize": normalize,
             "seed": seed,
             "backbone": {"class_path": backbone_class_path, "args": backbone_args or {}},
             "head": {"class_path": head_class_path, "args": head_args or {}},
@@ -184,6 +196,8 @@ def main(
         "batch_size": cfg.data.preprocess.batch_size,
         "shuffle": cfg.data.preprocess.shuffle,
         "augment": cfg.data.preprocess.augment,
+        "input_size": cfg.data.preprocess.input_size,
+        "normalize": cfg.data.preprocess.normalize,
         "seed": cfg.data.preprocess.seed,
         "backbone_class_path": cfg.model.backbone.class_path,
         "backbone_args": backbone_args,

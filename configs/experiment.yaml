@@ -20,6 +20,8 @@ base:
       batch_size: 128
       shuffle: true
       augment: false    # Whether to apply data augmentation (random crop, flip, color jitter, rotation, erasing). Only applies to training data.
+      input_size: 74    # Final square image size fed to the model.
+      normalize: true   # If true, normalize using per-domain mean/std computed from train split.
       seed: 42          # Random seed for reproducibility (null = no seed)
 
   model:
