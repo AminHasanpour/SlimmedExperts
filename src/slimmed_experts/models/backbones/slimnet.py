@@ -88,10 +88,10 @@ class SlimNetBackbone(Backbone):
     _BLOCK_SETTINGS: list[tuple[int, int, int, int]] = [
         (1, 16, 1, 1),
         (4, 24, 2, 2),
-        (4, 32, 3, 2),
-        (4, 48, 3, 2),
-        (6, 96, 2, 1),
-        (6, 160, 2, 2),
+        (4, 32, 2, 2),
+        (4, 48, 2, 2),
+        (6, 80, 2, 1),
+        (6, 128, 1, 2),
     ]
 
     def __init__(
@@ -107,8 +107,8 @@ class SlimNetBackbone(Backbone):
         if round_nearest <= 0:
             raise ValueError(f"round_nearest must be > 0, got {round_nearest}")
 
-        input_channel = _make_divisible(24 * width_mult, round_nearest)
-        last_channel = _make_divisible(1024 * max(1.0, width_mult), round_nearest)
+        input_channel = _make_divisible(16 * width_mult, round_nearest)
+        last_channel = _make_divisible(768 * max(1.0, width_mult), round_nearest)
 
         stem_stride = 1 if small_input else 2
         features: list[nn.Module] = [

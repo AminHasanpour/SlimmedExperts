@@ -16,7 +16,7 @@ data:
       - vgg-flowers
     data_dir: data
   preprocess:
-    batch_size: 128
+    batch_size: 256
     shuffle: true
     augment: false      # Whether to apply data augmentation (random crop, flip, color jitter, rotation, erasing). Only applies to training data.
     input_size: 74      # Final square image size fed to the model.
@@ -35,12 +35,12 @@ model:
 
 train:
   total_steps: 1000
-  learning_rate: 1e-3
-  weight_decay: 0.0
-  optimizer: adam
+  learning_rate: 0.1
+  weight_decay: 5e-4
+  optimizer: sgd
   scheduler: cosine     # LR scheduler: "cosine" (CosineAnnealingLR) or null to disable
-  warmup_steps: 0       # Number of initial steps with linear LR warmup from 0 to learning_rate
-  label_smoothing: 0.0  # Label smoothing factor for cross entropy loss
+  warmup_steps: 100     # Number of initial steps with linear LR warmup from 0 to learning_rate
+  label_smoothing: 0.05  # Label smoothing factor for cross entropy loss
   val_every_n_steps: 100
   output_dir: models    # Directory to save checkpoints (null = don't save)
   device: cpu           # Device to train on (e.g., "cpu", "cuda", "mps", etc.)
