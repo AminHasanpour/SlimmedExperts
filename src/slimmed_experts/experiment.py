@@ -64,6 +64,7 @@ def _config_to_pipeline_kwargs(cfg: DictConfig) -> dict:
         "optimizer": cfg.train.optimizer,
         "scheduler": cfg.train.scheduler,
         "warmup_steps": cfg.train.warmup_steps,
+        "backbone_steps": cfg.train.backbone_steps,
         "label_smoothing": cfg.train.label_smoothing,
         "val_every_n_steps": cfg.train.val_every_n_steps,
         "output_dir": cfg.train.output_dir,

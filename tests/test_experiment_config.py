@@ -38,6 +38,7 @@ def test_config_to_pipeline_kwargs_maps_plugin_fields() -> None:
                 "optimizer": "adam",
                 "scheduler": "cosine",
                 "warmup_steps": 2,
+                "backbone_steps": 3,
                 "label_smoothing": 0.1,
                 "val_every_n_steps": 1,
                 "output_dir": None,
@@ -57,4 +58,5 @@ def test_config_to_pipeline_kwargs_maps_plugin_fields() -> None:
     assert kwargs["normalize"] is False
     assert kwargs["scheduler"] == "cosine"
     assert kwargs["warmup_steps"] == 2
+    assert kwargs["backbone_steps"] == 3
     assert kwargs["label_smoothing"] == 0.1

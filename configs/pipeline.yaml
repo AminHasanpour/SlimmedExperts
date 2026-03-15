@@ -40,6 +40,7 @@ train:
   optimizer: sgd
   scheduler: cosine     # LR scheduler: "cosine" (CosineAnnealingLR) or null to disable
   warmup_steps: 100     # Number of initial steps with linear LR warmup from 0 to learning_rate
+  backbone_steps: null  # Number of initial steps to train backbone before freezing (null = never freeze)
   label_smoothing: 0.05  # Label smoothing factor for cross entropy loss
   val_every_n_steps: 100
   output_dir: models    # Directory to save checkpoints (null = don't save)

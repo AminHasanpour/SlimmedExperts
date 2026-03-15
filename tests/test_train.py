@@ -352,6 +352,20 @@ class TestTrain:
                 warmup_steps=3,
             )
 
+    def test_invalid_backbone_steps_raises_value_error(self, tiny_model):
+        train_ds = {"d1": _make_dataloader(num_classes=5)}
+        val_ds = {"d1": _make_dataloader(num_classes=5)}
+
+        with pytest.raises(ValueError, match="backbone_steps"):
+            train(
+                tiny_model,
+                train_ds,
+                val_ds,
+                total_steps=2,
+                learning_rate=1e-3,
+                backbone_steps=3,
+            )
+
     def test_invalid_label_smoothing_raises_value_error(self, tiny_model):
         train_ds = {"d1": _make_dataloader(num_classes=5)}
         val_ds = {"d1": _make_dataloader(num_classes=5)}
@@ -385,3 +399,54 @@ class TestTrain:
         )
 
         assert "acc/d1" in result
+
+    def test_backbone_freezes_after_backbone_steps(self):
+        torch.manual_seed(7)
+        backbone = MobileNetV2Backbone(width_mult=0.35, small_input=True)
+        head = LinearMultiHead(["d1"], {"d1": 5}, in_features=backbone.output_dim)
+        model_freeze = MultiHeadModel(backbone=backbone, head=head)
+
+        model_no_freeze = MultiHeadModel(
+            backbone=MobileNetV2Backbone(width_mult=0.35, small_input=True),
+            head=LinearMultiHead(["d1"], {"d1": 5}, in_features=backbone.output_dim),
+        )
+        model_no_freeze.load_state_dict(model_freeze.state_dict())
+
+        init_backbone = {k: v.detach().clone() for k, v in model_freeze.backbone.state_dict().items()}
+
+        train_ds = {"d1": _make_dataloader(num_batches=2, batch_size=4, num_classes=5)}
+        val_ds = {"d1": _make_dataloader(num_batches=1, batch_size=4, num_classes=5)}
+
+        train(
+            model_freeze,
+            train_ds,
+            val_ds,
+            total_steps=2,
+            learning_rate=1e-2,
+            optimizer="sgd",
+            backbone_steps=1,
+            val_every_n_steps=2,
+            device="cpu",
+        )
+        train(
+            model_no_freeze,
+            train_ds,
+            val_ds,
+            total_steps=2,
+            learning_rate=1e-2,
+            optimizer="sgd",
+            backbone_steps=2,
+            val_every_n_steps=2,
+            device="cpu",
+        )
+
+        def _total_backbone_delta(model: MultiHeadModel) -> float:
+            total = 0.0
+            for key, tensor in model.backbone.state_dict().items():
+                total += (tensor - init_backbone[key]).abs().sum().item()
+            return total
+
+        delta_with_freeze = _total_backbone_delta(model_freeze)
+        delta_without_freeze = _total_backbone_delta(model_no_freeze)
+
+        assert delta_without_freeze > delta_with_freeze

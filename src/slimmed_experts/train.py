@@ -96,6 +96,7 @@ def train(
     optimizer: str = "adam",
     scheduler: str | None = "cosine",
     warmup_steps: int = 0,
+    backbone_steps: int | None = None,
     label_smoothing: float = 0.0,
     val_every_n_steps: int = 100,
     output_dir: str | Path | None = None,
@@ -120,6 +121,10 @@ def train(
         scheduler: LR scheduler to use after warmup (``"cosine"`` or ``None``).
         warmup_steps: Number of warmup steps. Learning rate increases linearly
             from 0 to ``learning_rate`` over this many initial steps.
+        backbone_steps: Number of initial training steps during which the
+            backbone is trainable. After this step, backbone parameters are
+            frozen and only head parameters continue to train. ``None`` means
+            backbone remains trainable for all steps.
         label_smoothing: Label smoothing for
             :class:`~torch.nn.CrossEntropyLoss`.
         val_every_n_steps: Run validation every this many steps.
@@ -137,10 +142,13 @@ def train(
         ValueError: If *optimizer* is not ``"adam"`` or ``"sgd"``.
         ValueError: If *scheduler* is not ``"cosine"`` or ``None``.
         ValueError: If *warmup_steps* is negative or exceeds *total_steps*.
+        ValueError: If *backbone_steps* is negative or exceeds *total_steps*.
         ValueError: If *label_smoothing* is not in ``[0.0, 1.0)``.
     """
     if warmup_steps < 0 or warmup_steps > total_steps:
         raise ValueError(f"warmup_steps must be in [0, total_steps]. Got {warmup_steps}.")
+    if backbone_steps is not None and (backbone_steps < 0 or backbone_steps > total_steps):
+        raise ValueError(f"backbone_steps must be in [0, total_steps] or None. Got {backbone_steps}.")
     if label_smoothing < 0.0 or label_smoothing >= 1.0:
         raise ValueError(f"label_smoothing must be in [0.0, 1.0). Got {label_smoothing}.")
 
@@ -201,8 +209,25 @@ def train(
 
     logger.info(f"Starting training: total_steps={total_steps}, domains={domains}, device={device_}")
 
+    backbone_frozen = False
+
+    def _freeze_backbone() -> None:
+        nonlocal backbone_frozen
+        if backbone_frozen:
+            return
+        for param in model.backbone.parameters():
+            param.requires_grad = False
+        backbone_frozen = True
+        logger.info("Backbone frozen. Continuing training with heads only.")
+
+    if backbone_steps == 0:
+        _freeze_backbone()
+
     model.train()
     for step in range(1, total_steps + 1):
+        if not backbone_frozen and backbone_steps is not None and step > backbone_steps:
+            _freeze_backbone()
+
         domain = next(domain_cycle)
         images, labels = next(train_iters[domain])
         images, labels = images.to(device_), labels.to(device_)
