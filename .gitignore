@@ -2,6 +2,7 @@
 /data/
 /models/
 /reports/
+/logs/
 
 # wandb
 wandb/

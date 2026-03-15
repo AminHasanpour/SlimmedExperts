@@ -200,8 +200,8 @@ def train(
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
 
-    # --- Infinite round-robin iterators ---
-    train_iters = {d: iter(itertools.cycle(train_datasets[d])) for d in domains}
+    # --- Round-robin iterators ---
+    train_iters = {d: iter(train_datasets[d]) for d in domains}
     domain_cycle = itertools.cycle(domains)
 
     best_val_acc: float = -1.0
@@ -229,10 +229,14 @@ def train(
             _freeze_backbone()
 
         domain = next(domain_cycle)
-        images, labels = next(train_iters[domain])
+        try:
+            images, labels = next(train_iters[domain])
+        except StopIteration:
+            train_iters[domain] = iter(train_datasets[domain])
+            images, labels = next(train_iters[domain])
         images, labels = images.to(device_), labels.to(device_)
 
-        opt.zero_grad()
+        opt.zero_grad(set_to_none=True)
         logits = model(images, domain)
         loss = criterion(logits, labels)
         loss.backward()
